@@ -4,8 +4,8 @@ from .data_loader import (
     get_data, sanitize_json_obj, record_offer_response,
     get_offer_responses, add_merchant_item, update_merchant_item, delete_merchant_item,
     register_customer, login_customer, update_customer_profile,
-    register_merchant, login_merchant, update_merchant_profile, get_customer,
-    get_user_id_from_token, destroy_session, sanitize_customer_record,
+    register_merchant, login_merchant, update_merchant_profile, get_customer, get_merchant,
+    get_user_id_from_token, destroy_session, sanitize_customer_record, sanitize_merchant_record,
     create_offer, update_offer, delete_offer, toggle_offer_status,
     get_merchant_offers, get_active_published_offers
 )
@@ -109,6 +109,23 @@ async def merch_logout_endpoint(authorization: str = Header(None)):
     if not ok:
         raise HTTPException(status_code=401, detail="Invalid session token")
     return {"status": "logged_out"}
+
+@app.get('/merchant/profile/me')
+async def get_my_merchant_profile(authorization: str = Header(None)):
+    merch_id = require_merchant_id(authorization)
+    merch = get_merchant(merch_id)
+    if not merch:
+        raise HTTPException(status_code=404, detail="Merchant not found")
+    return sanitize_merchant_record(merch)
+
+@app.put('/merchant/profile/me')
+async def update_my_merchant_profile(payload: dict, authorization: str = Header(None)):
+    merch_id = require_merchant_id(authorization)
+    try:
+        res = update_merchant_profile(merch_id, payload)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.put('/merchant/me/{merchant_id}')
 async def update_merchant_profile_endpoint(merchant_id: str, payload: dict, authorization: str = Header(None)):

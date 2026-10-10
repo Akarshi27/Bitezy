@@ -961,7 +961,30 @@ export default function CustomerStore({
                 <span>Demo Total</span><span style={{ color: 'var(--bitezy-red)' }}>₹{cartSubtotal.toFixed(0)}</span>
               </div>
             </div>
-            <button className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }} onClick={() => { setCheckoutDone(true); setCheckoutOpen(false); onClearCart(); onCloseCart() }}>
+            <button className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }} onClick={() => {
+              if (activeCustomer && activeCustomer.id && cart.length > 0) {
+                const newOrder = {
+                  id: `ORD-${Math.floor(100000 + Math.random() * 900000)}`,
+                  date: new Date().toISOString(),
+                  items: [...cart],
+                  subtotal: cartSubtotal,
+                  discount: 0,
+                  total: cartSubtotal,
+                  status: 'Completed'
+                }
+                try {
+                  const existingKey = `bitezy_orders_${activeCustomer.id}`
+                  const existing = JSON.parse(localStorage.getItem(existingKey) || '[]')
+                  localStorage.setItem(existingKey, JSON.stringify([newOrder, ...existing]))
+                } catch (err) {
+                  console.error('Failed to save order history:', err)
+                }
+              }
+              setCheckoutDone(true)
+              setCheckoutOpen(false)
+              onClearCart()
+              onCloseCart()
+            }}>
               ✓ Simulate Demo Checkout
             </button>
             <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setCheckoutOpen(false)}>

@@ -365,6 +365,14 @@ def update_merchant_profile(merchant_id: str, updates: dict) -> dict:
         
     return sanitize_json_obj(merch)
 
+def get_merchant(merchant_id: str):
+    data = get_data()
+    if merchant_id in data['merchants']:
+        return dict(data['merchants'][merchant_id])
+    if merchant_id in _custom_data['merchants']:
+        return dict(_custom_data['merchants'][merchant_id])
+    return None
+
 def get_customer(customer_id):
     data = get_data()
     if customer_id in data['customers']:
