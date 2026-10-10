@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import axios from 'axios'
 import {
-  Search, MapPin, Star, Clock, Tag, ChevronRight, Zap, ShoppingBag,
-  X, Plus, Minus, RefreshCw, CheckCircle, XCircle, Leaf, Flame as FlameIcon,
-  SlidersHorizontal, Loader2
+  Search, MapPin, Clock, Tag, Zap, ShoppingBag, ChevronRight,
+  X, Plus, CheckCircle, XCircle, Leaf, Flame as FlameIcon,
+  Loader2
 } from 'lucide-react'
 
 const API_BASE = 'http://localhost:8000'

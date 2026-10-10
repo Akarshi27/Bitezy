@@ -1,7 +1,56 @@
 {
-  "customers": {},
+  "customers": {
+    "c_reg_001": {
+      "id": "c_reg_001",
+      "name": "Akarshi Srivastava",
+      "email": "akarshisrivastava2@gmail.com",
+      "password_hash": "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f",
+      "language": "en",
+      "locality": "Koramangala",
+      "marketing_consent": true,
+      "wallet_inr": 500.0,
+      "declared_preferences": "south_indian,cafe",
+      "food_type": "veg",
+      "budget": 300,
+      "max_distance_m": 2000,
+      "churn_risk": 0.1,
+      "price_sensitivity": 0.5,
+      "avg_spend": 200.0,
+      "visit_history": []
+    },
+    "c_reg_002": {
+      "id": "c_reg_002",
+      "name": "Akarshi Test",
+      "email": "test_user_01@bitezy.com",
+      "password_hash": "4dbd5e49147b5102ee2731ac03dd0db7decc3b8715c3df3c1f3ddc62dcbcf86d",
+      "language": "en",
+      "locality": "Indiranagar",
+      "marketing_consent": true,
+      "wallet_inr": 500.0,
+      "declared_preferences": "biryani,fast_food",
+      "food_type": "non_veg",
+      "budget": 450,
+      "max_distance_m": 2000,
+      "churn_risk": 0.1,
+      "price_sensitivity": 0.5,
+      "avg_spend": 200.0,
+      "visit_history": []
+    }
+  },
   "merchants": {},
   "offer_responses": [
+    {
+      "offer_id": "off_test_acc_001",
+      "customer_id": "c_001",
+      "merchant_id": "m_001",
+      "action": "accepted"
+    },
+    {
+      "offer_id": "off_test_acc_001",
+      "customer_id": "c_001",
+      "merchant_id": "m_001",
+      "action": "accepted"
+    },
     {
       "offer_id": "off_test_acc_001",
       "customer_id": "c_001",

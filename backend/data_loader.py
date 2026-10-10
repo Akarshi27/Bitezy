@@ -126,6 +126,45 @@ def _save_custom_store():
 
 _load_custom_store()
 
+import secrets
+from datetime import datetime
+
+_active_sessions = {}
+
+def create_session(user_id: str, user_type: str = 'customer') -> str:
+    token = f"tok_{secrets.token_hex(24)}"
+    _active_sessions[token] = {
+        'user_id': user_id,
+        'user_type': user_type,
+        'created_at': datetime.now().isoformat()
+    }
+    return token
+
+def get_user_id_from_token(token: str):
+    if not token:
+        return None
+    if token.startswith("Bearer "):
+        token = token[7:].strip()
+    session = _active_sessions.get(token)
+    return session['user_id'] if session else None
+
+def destroy_session(token: str) -> bool:
+    if not token:
+        return False
+    if token.startswith("Bearer "):
+        token = token[7:].strip()
+    if token in _active_sessions:
+        del _active_sessions[token]
+        return True
+    return False
+
+def sanitize_customer_record(cust: dict) -> dict:
+    if not cust:
+        return None
+    res = dict(cust)
+    res.pop('password_hash', None)
+    return sanitize_json_obj(res)
+
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
@@ -133,6 +172,9 @@ def register_customer(cust_data: dict) -> dict:
     email = cust_data.get('email', '').strip().lower()
     if not email:
         raise ValueError("Email is required")
+    password = cust_data.get('password', '')
+    if not password or len(password) < 6:
+        raise ValueError("Password must be at least 6 characters long")
     
     # Check duplicate
     for c in _custom_data['customers'].values():
@@ -144,7 +186,7 @@ def register_customer(cust_data: dict) -> dict:
         'id': cust_id,
         'name': cust_data.get('name', 'Registered User'),
         'email': email,
-        'password_hash': hash_password(cust_data.get('password', '123456')),
+        'password_hash': hash_password(password),
         'language': cust_data.get('language', 'en'),
         'locality': cust_data.get('locality', 'Koramangala'),
         'marketing_consent': bool(cust_data.get('marketing_consent', True)),
@@ -166,25 +208,39 @@ def register_customer(cust_data: dict) -> dict:
     data = get_data()
     data['customers'][cust_id] = record
     
-    return sanitize_json_obj(record)
+    token = create_session(cust_id, 'customer')
+    return {
+        'token': token,
+        'customer': sanitize_customer_record(record)
+    }
 
 def login_customer(email: str, password: str) -> dict:
     email = email.strip().lower()
+    if not email or not password:
+        raise ValueError("Email and password are required")
     hashed = hash_password(password)
     
     # Check custom registered customers
     for c in _custom_data['customers'].values():
         if c.get('email') == email:
             if c.get('password_hash') == hashed:
-                return sanitize_json_obj(c)
+                token = create_session(c['id'], 'customer')
+                return {
+                    'token': token,
+                    'customer': sanitize_customer_record(c)
+                }
             else:
-                raise ValueError("Invalid credentials")
+                raise ValueError("Invalid password")
                 
     # Demo fallback check
     data = get_data()
     for c in data['customers'].values():
         if c.get('id') == email or c.get('name', '').lower() == email:
-            return sanitize_json_obj(c)
+            token = create_session(c['id'], 'customer')
+            return {
+                'token': token,
+                'customer': sanitize_customer_record(c)
+            }
             
     raise ValueError("Account not found")
 
@@ -203,7 +259,7 @@ def update_customer_profile(customer_id: str, updates: dict) -> dict:
         _custom_data['customers'][customer_id] = cust
         _save_custom_store()
         
-    return sanitize_json_obj(cust)
+    return sanitize_customer_record(cust)
 
 def register_merchant(merch_data: dict) -> dict:
     email = merch_data.get('email', '').strip().lower()

@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
-  ShoppingBag, Shield, Store, Flame, Utensils, LogIn, UserCircle, MapPin, ChevronDown, X
+  ShoppingBag, Shield, Store, Flame, Utensils, LogIn, UserCircle, MapPin, ChevronDown, X, CheckCircle2
 } from 'lucide-react'
 import axios from 'axios'
 
@@ -25,20 +25,71 @@ export default function Navbar({
   const [authTab, setAuthTab] = useState<'login' | 'signup'>('login')
   const [showPersonas, setShowPersonas] = useState(false)
   const [form, setForm] = useState({ name: '', email: '', password: '', locality: 'Koramangala', language: 'en', marketing_consent: true })
+  const [profileForm, setProfileForm] = useState({ name: '', locality: 'Koramangala', language: 'en', budget: 300, food_type: 'both', declared_preferences: 'south_indian,cafe' })
   const [authError, setAuthError] = useState('')
+  const [authSuccess, setAuthSuccess] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
   const [loggedInUser, setLoggedInUser] = useState<any>(null)
+  const [token, setToken] = useState<string | null>(localStorage.getItem('bitezy_customer_token'))
 
-  const isRegistered = loggedInUser && loggedInUser.email
+  useEffect(() => {
+    const savedCust = localStorage.getItem('bitezy_customer_data')
+    const savedToken = localStorage.getItem('bitezy_customer_token')
+    if (savedToken && savedCust) {
+      try {
+        const parsed = JSON.parse(savedCust)
+        setLoggedInUser(parsed)
+        setToken(savedToken)
+        onSelectCustomer(parsed)
+        // Fetch fresh profile from /customer/profile/me
+        axios.get(`${API_BASE}/customer/profile/me`, {
+          headers: { Authorization: `Bearer ${savedToken}` }
+        }).then(res => {
+          if (res.data) {
+            setLoggedInUser(res.data)
+            localStorage.setItem('bitezy_customer_data', JSON.stringify(res.data))
+            onSelectCustomer(res.data)
+          }
+        }).catch(() => {
+          // Token expired or invalid
+          localStorage.removeItem('bitezy_customer_token')
+          localStorage.removeItem('bitezy_customer_data')
+          setToken(null)
+          setLoggedInUser(null)
+        })
+      } catch { /* ignore parse error */ }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (loggedInUser) {
+      setProfileForm({
+        name: loggedInUser.name || '',
+        locality: loggedInUser.locality || 'Koramangala',
+        language: loggedInUser.language || 'en',
+        budget: loggedInUser.budget || loggedInUser.wallet_inr || 300,
+        food_type: loggedInUser.food_type || 'both',
+        declared_preferences: loggedInUser.declared_preferences || 'south_indian,cafe'
+      })
+    }
+  }, [loggedInUser])
+
+  const isRegistered = loggedInUser && loggedInUser.id
 
   const handleLogin = async () => {
     setAuthLoading(true)
     setAuthError('')
+    setAuthSuccess('')
     try {
       const res = await axios.post(`${API_BASE}/auth/customer/login`, { email: form.email, password: form.password })
-      setLoggedInUser(res.data)
-      onSelectCustomer(res.data)
-      onAuthChange?.(res.data)
+      const custData = res.data.customer || res.data
+      const userToken = res.data.token
+      setLoggedInUser(custData)
+      setToken(userToken)
+      if (userToken) localStorage.setItem('bitezy_customer_token', userToken)
+      localStorage.setItem('bitezy_customer_data', JSON.stringify(custData))
+      onSelectCustomer(custData)
+      onAuthChange?.(custData)
       setAuthModal(null)
     } catch (e: any) {
       setAuthError(e.response?.data?.detail || 'Login failed')
@@ -48,14 +99,21 @@ export default function Navbar({
   }
 
   const handleSignup = async () => {
-    if (!form.name || !form.email || !form.password) { setAuthError('All fields required'); return }
+    if (!form.name || !form.email || !form.password) { setAuthError('All fields are required'); return }
+    if (form.password.length < 6) { setAuthError('Password must be at least 6 characters long'); return }
     setAuthLoading(true)
     setAuthError('')
+    setAuthSuccess('')
     try {
       const res = await axios.post(`${API_BASE}/auth/customer/register`, form)
-      setLoggedInUser(res.data)
-      onSelectCustomer(res.data)
-      onAuthChange?.(res.data)
+      const custData = res.data.customer || res.data
+      const userToken = res.data.token
+      setLoggedInUser(custData)
+      setToken(userToken)
+      if (userToken) localStorage.setItem('bitezy_customer_token', userToken)
+      localStorage.setItem('bitezy_customer_data', JSON.stringify(custData))
+      onSelectCustomer(custData)
+      onAuthChange?.(custData)
       setAuthModal(null)
     } catch (e: any) {
       setAuthError(e.response?.data?.detail || 'Signup failed')
@@ -64,7 +122,35 @@ export default function Navbar({
     }
   }
 
-  const handleLogout = () => {
+  const handleUpdateProfile = async () => {
+    if (!token) return
+    setAuthLoading(true)
+    setAuthError('')
+    setAuthSuccess('')
+    try {
+      const res = await axios.put(`${API_BASE}/customer/profile/me`, profileForm, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setLoggedInUser(res.data)
+      localStorage.setItem('bitezy_customer_data', JSON.stringify(res.data))
+      onSelectCustomer(res.data)
+      setAuthSuccess('Profile & preferences updated successfully!')
+    } catch (e: any) {
+      setAuthError(e.response?.data?.detail || 'Failed to update profile')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    if (token) {
+      axios.post(`${API_BASE}/auth/customer/logout`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => {})
+    }
+    localStorage.removeItem('bitezy_customer_token')
+    localStorage.removeItem('bitezy_customer_data')
+    setToken(null)
     setLoggedInUser(null)
     const fallback = customers[0]
     if (fallback) onSelectCustomer(fallback)
@@ -297,24 +383,83 @@ export default function Navbar({
         </div>
       ) : authModal === 'profile' && loggedInUser ? (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setAuthModal(null)}>
-          <div className="modal-box modal-sm slide-up">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h3 style={{ fontWeight: 800 }}>My Profile</h3>
+          <div className="modal-box modal-md slide-up" style={{ maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontWeight: 800, fontSize: 18 }}>My Profile & Saved Preferences</h3>
               <button onClick={() => setAuthModal(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={18} /></button>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--border-default)', marginBottom: 14 }}>
-              <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--bitezy-red)', color: 'white', fontSize: 20, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border-default)', marginBottom: 20 }}>
+              <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--bitezy-red)', color: 'white', fontSize: 18, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {loggedInUser.name?.[0]?.toUpperCase()}
               </div>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 16 }}>{loggedInUser.name}</div>
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{loggedInUser.email}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{loggedInUser.locality} • {loggedInUser.id}</div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{loggedInUser.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{loggedInUser.email || loggedInUser.id}</div>
+                <div style={{ fontSize: 11, color: 'var(--bitezy-red)', fontWeight: 600 }}>Customer ID: {loggedInUser.id}</div>
               </div>
             </div>
-            <button className="btn btn-danger" style={{ width: '100%', justifyContent: 'center' }} onClick={handleLogout}>
-              Sign Out
-            </button>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
+              <div>
+                <label>Full Name</label>
+                <input value={profileForm.name} onChange={e => setProfileForm(p => ({ ...p, name: e.target.value }))} />
+              </div>
+
+              <div className="grid-2">
+                <div>
+                  <label>Locality</label>
+                  <select value={profileForm.locality} onChange={e => setProfileForm(p => ({ ...p, locality: e.target.value }))}>
+                    {['Koramangala', 'Indiranagar', 'HSR Layout', 'Whitefield', 'Marathahalli', 'BTM Layout', 'Jayanagar', 'Malleshwaram'].map(l => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label>Language</label>
+                  <select value={profileForm.language} onChange={e => setProfileForm(p => ({ ...p, language: e.target.value }))}>
+                    <option value="en">English</option>
+                    <option value="hi-en">Hindi-English (Hinglish)</option>
+                    <option value="kn-en">Kannada-English</option>
+                    <option value="ta-en">Tamil-English</option>
+                    <option value="te-en">Telugu-English</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div>
+                  <label>Budget (₹)</label>
+                  <input type="number" value={profileForm.budget} onChange={e => setProfileForm(p => ({ ...p, budget: parseFloat(e.target.value) || 0 }))} />
+                </div>
+                <div>
+                  <label>Dietary Choice</label>
+                  <select value={profileForm.food_type} onChange={e => setProfileForm(p => ({ ...p, food_type: e.target.value }))}>
+                    <option value="both">Vegetarian & Non-Veg</option>
+                    <option value="veg">Vegetarian Only</option>
+                    <option value="non_veg">Non-Vegetarian Only</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label>Food Preferences (comma-separated tags)</label>
+                <input value={profileForm.declared_preferences} onChange={e => setProfileForm(p => ({ ...p, declared_preferences: e.target.value }))} placeholder="e.g. south_indian,cafe,fast_food" />
+              </div>
+
+              {authError && <div style={{ background: 'var(--bitezy-red-light)', border: '1px solid rgba(226,55,68,0.3)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: 'var(--bitezy-red)' }}>{authError}</div>}
+              {authSuccess && <div style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: 6 }}><CheckCircle2 size={14} /> {authSuccess}</div>}
+
+              <button className="btn btn-primary" onClick={handleUpdateProfile} disabled={authLoading} style={{ justifyContent: 'center' }}>
+                {authLoading ? 'Saving...' : 'Save Profile & Preferences'}
+              </button>
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: 16 }}>
+              <button className="btn btn-danger" style={{ width: '100%', justifyContent: 'center' }} onClick={handleLogout}>
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

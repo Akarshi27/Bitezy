@@ -1,10 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from .data_loader import (
     get_data, sanitize_json_obj, record_offer_response,
     get_offer_responses, add_merchant_item, update_merchant_item, delete_merchant_item,
     register_customer, login_customer, update_customer_profile,
-    register_merchant, login_merchant, update_merchant_profile, get_customer
+    register_merchant, login_merchant, update_merchant_profile, get_customer,
+    get_user_id_from_token, destroy_session, sanitize_customer_record
 )
 from .decision import decide
 from .analytics import compute_baseline_analytics
@@ -12,6 +13,14 @@ from .model_scorer import train_and_evaluate_model
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'])
+
+def require_customer_id(authorization: str = Header(None)) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization token required")
+    cust_id = get_user_id_from_token(authorization)
+    if not cust_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token")
+    return cust_id
 
 @app.post('/auth/customer/register')
 async def cust_register_endpoint(payload: dict):
@@ -29,8 +38,37 @@ async def cust_login_endpoint(payload: dict):
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
 
+@app.post('/auth/customer/logout')
+async def cust_logout_endpoint(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization token required")
+    ok = destroy_session(authorization)
+    if not ok:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    return {"status": "logged_out"}
+
+@app.get('/customer/profile/me')
+async def get_my_profile(authorization: str = Header(None)):
+    cust_id = require_customer_id(authorization)
+    cust = get_customer(cust_id)
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return sanitize_customer_record(cust)
+
+@app.put('/customer/profile/me')
+async def update_my_profile(payload: dict, authorization: str = Header(None)):
+    cust_id = require_customer_id(authorization)
+    try:
+        res = update_customer_profile(cust_id, payload)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.put('/customer/profile/{customer_id}')
-async def cust_profile_endpoint(customer_id: str, payload: dict):
+async def cust_profile_endpoint(customer_id: str, payload: dict, authorization: str = Header(None)):
+    auth_id = require_customer_id(authorization)
+    if auth_id != customer_id:
+        raise HTTPException(status_code=403, detail="Forbidden: Cannot edit another customer's profile")
     try:
         res = update_customer_profile(customer_id, payload)
         return res
