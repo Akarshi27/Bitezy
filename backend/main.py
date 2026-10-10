@@ -12,6 +12,7 @@ from .data_loader import (
 from .decision import decide
 from .analytics import compute_baseline_analytics
 from .model_scorer import train_and_evaluate_model
+from .chat_engine import process_customer_chat
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'])
@@ -63,6 +64,38 @@ async def update_my_profile(payload: dict, authorization: str = Header(None)):
     try:
         res = update_customer_profile(cust_id, payload)
         return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post('/customer/chat')
+async def customer_chat_endpoint(payload: dict, authorization: str = Header(None)):
+    cust_id = payload.get('customer_id')
+    if authorization:
+        try:
+            auth_id = require_customer_id(authorization)
+            if auth_id:
+                cust_id = auth_id
+        except Exception:
+            pass
+
+    if not cust_id:
+        cust_id = 'c_020'
+
+    message = payload.get('message', '').strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Chat message is required")
+
+    language = payload.get('language', 'en')
+    context = payload.get('context', {})
+
+    try:
+        res = process_customer_chat(
+            customer_id=cust_id,
+            message=message,
+            language=language,
+            context=context
+        )
+        return sanitize_json_obj(res)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

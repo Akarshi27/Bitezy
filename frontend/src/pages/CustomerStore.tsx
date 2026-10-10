@@ -3,9 +3,10 @@ import axios from 'axios'
 import {
   Search, MapPin, Clock, Tag, Zap, ShoppingBag, ChevronRight,
   X, Plus, CheckCircle, XCircle, Leaf, Flame as FlameIcon,
-  Loader2, Bell, Map as MapIcon
+  Loader2, Bell, Map as MapIcon, Sparkles
 } from 'lucide-react'
 import BitezyMap from '../components/BitezyMap'
+import AIChatbot from '../components/AIChatbot'
 
 const API_BASE = 'http://localhost:8000'
 
@@ -43,6 +44,7 @@ export default function CustomerStore({
   const [loading, setLoading] = useState(true)
   const [category, setCategory] = useState('all')
   const [searchQ, setSearchQ] = useState('')
+  const [activeTab, setActiveTab] = useState<'store' | 'chat'>('store')
 
   // Craving modal & active applied preferences
   const [cravingOpen, setCravingOpen] = useState(false)
@@ -342,6 +344,10 @@ export default function CustomerStore({
                   <Zap size={16} /> What are you craving?
                 </button>
 
+                <button className="btn btn-secondary btn-lg" onClick={() => setActiveTab(t => t === 'chat' ? 'store' : 'chat')} style={{ gap: 8 }}>
+                  <Sparkles size={16} /> {activeTab === 'chat' ? 'Browse Storefront' : '🤖 Ask AI Assistant'}
+                </button>
+
                 <button className="btn btn-ghost btn-lg" onClick={() => setShowMap(s => !s)} style={{ gap: 8 }}>
                   <MapIcon size={16} /> {showMap ? 'Hide Map' : 'Show Map'}
                 </button>
@@ -419,7 +425,32 @@ export default function CustomerStore({
 
       <div className="page-body">
 
-        {/* ── ACTIVE CRAVING FILTERS BAR ── */}
+        {/* ── VIEW SWITCHER TABS ── */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 24, borderBottom: '1px solid var(--border-default)', paddingBottom: 12 }}>
+          <button
+            className={`btn ${activeTab === 'store' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('store')}
+            style={{ gap: 8, padding: '10px 18px', fontSize: 14 }}
+          >
+            <ShoppingBag size={16} /> Deals &amp; Cafes
+          </button>
+          <button
+            className={`btn ${activeTab === 'chat' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('chat')}
+            style={{ gap: 8, padding: '10px 18px', fontSize: 14, position: 'relative' }}
+          >
+            <Sparkles size={16} /> 🤖 AI Food Assistant Chatbot
+            <span className="badge badge-red" style={{ fontSize: 9, padding: '2px 5px' }}>ML Powered</span>
+          </button>
+        </div>
+
+        {activeTab === 'chat' ? (
+          <div className="fade-in" style={{ maxWidth: 960, margin: '0 auto 40px' }}>
+            <AIChatbot activeCustomer={activeCustomer} onAddToCart={onAddToCart} />
+          </div>
+        ) : (
+          <>
+            {/* ── ACTIVE CRAVING FILTERS BAR ── */}
         {appliedPrefs && (
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)', borderRadius: 12, padding: '12px 18px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -692,6 +723,8 @@ export default function CustomerStore({
             </div>
           </section>
         )}
+      </>
+      )}
       </div>
 
       {/* ── CRAVING FORM MODAL ── */}
