@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import {
   Search, MapPin, Clock, Tag, Zap, ShoppingBag, ChevronRight,
   X, Plus, CheckCircle, XCircle, Leaf, Flame as FlameIcon,
-  Loader2
+  Loader2, Bell, Map as MapIcon
 } from 'lucide-react'
+import BitezyMap from '../components/BitezyMap'
 
 const API_BASE = 'http://localhost:8000'
 
@@ -43,7 +44,7 @@ export default function CustomerStore({
   const [category, setCategory] = useState('all')
   const [searchQ, setSearchQ] = useState('')
 
-  // Craving modal
+  // Craving modal & active applied preferences
   const [cravingOpen, setCravingOpen] = useState(false)
   const [prefs, setPrefs] = useState({
     food_preference: 'anything',
@@ -56,9 +57,17 @@ export default function CustomerStore({
     lng: '',
     locality: '',
   })
+  const [appliedPrefs, setAppliedPrefs] = useState<any | null>(null)
+  const reqSeqRef = useRef(0)
   const [recLoading, setRecLoading] = useState(false)
   const [recommendations, setRecommendations] = useState<any[]>([])
   const [geoStatus, setGeoStatus] = useState<'idle' | 'requesting' | 'ok' | 'denied'>('idle')
+
+  // Active published offers (from merchants)
+  const [activeOffers, setActiveOffers] = useState<any[]>([])
+  const [notifDrawerOpen, setNotifDrawerOpen] = useState(false)
+  const [readOfferIds, setReadOfferIds] = useState<Set<string>>(new Set())
+  const [showMap, setShowMap] = useState(false)
 
   // Restaurant detail modal
   const [selectedMerchant, setSelectedMerchant] = useState<any>(null)
@@ -80,32 +89,99 @@ export default function CustomerStore({
   }, [])
 
   useEffect(() => {
-    if (activeCustomer?.locality) setSelectedLocality(activeCustomer.locality)
-    if (activeCustomer?.declared_preferences) {
-      const pref = activeCustomer.declared_preferences
-      setPrefs(p => ({
-        ...p,
-        food_preference: pref.includes('south_indian') ? 'south_indian'
-          : pref.includes('fast_food') ? 'fast_food'
-          : pref.includes('healthy') ? 'healthy'
-          : pref.includes('cafe') ? 'cafe' : 'anything',
-        budget: activeCustomer.wallet_inr || 300,
-        locality: activeCustomer.locality || '',
-      }))
+    if (activeCustomer) {
+      if (activeCustomer.locality) setSelectedLocality(activeCustomer.locality)
+      const declared = activeCustomer.declared_preferences || ''
+      const initPrefs = {
+        food_preference: declared.includes('south_indian') ? 'south_indian'
+          : declared.includes('fast_food') ? 'fast_food'
+          : declared.includes('healthy') ? 'healthy'
+          : declared.includes('cafe') ? 'cafe' : 'anything',
+        budget: activeCustomer.budget || activeCustomer.wallet_inr || 300,
+        available_time: 30,
+        food_type: activeCustomer.food_type || 'both',
+        max_distance_m: activeCustomer.max_distance_m || 2000,
+        intent: '',
+        lat: activeCustomer.current_lat?.toString() || '',
+        lng: activeCustomer.current_lng?.toString() || '',
+        locality: activeCustomer.locality || 'Koramangala'
+      }
+      setPrefs(initPrefs)
+      if (merchants.length > 0) {
+        fetchRecommendations(initPrefs)
+      }
     }
-  }, [activeCustomer])
+  }, [activeCustomer, merchants.length])
 
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [mRes, cRes] = await Promise.all([
+      const [mRes, cRes, offRes] = await Promise.all([
         axios.get(`${API_BASE}/data/merchants`).catch(() => ({ data: [] })),
-        axios.get(`${API_BASE}/data/catalog`).catch(() => ({ data: [] }))
+        axios.get(`${API_BASE}/data/catalog`).catch(() => ({ data: [] })),
+        axios.get(`${API_BASE}/offers/active`).catch(() => ({ data: [] }))
       ])
-      setMerchants(Array.isArray(mRes.data) ? mRes.data : [])
-      setCatalog(Array.isArray(cRes.data) ? cRes.data : [])
+      const mList = Array.isArray(mRes.data) ? mRes.data : []
+      const cList = Array.isArray(cRes.data) ? cRes.data : []
+      setMerchants(mList)
+      setCatalog(cList)
+      if (Array.isArray(offRes.data)) setActiveOffers(offRes.data)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const refreshActiveOffers = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/offers/active`).catch(() => ({ data: [] }))
+      if (Array.isArray(res.data)) setActiveOffers(res.data)
+    } catch { /* best effort */ }
+  }
+
+  const fetchRecommendations = async (targetPrefs: any) => {
+    if (!activeCustomer || merchants.length === 0) return
+    const seq = ++reqSeqRef.current
+    setRecLoading(true)
+
+    const now = new Date()
+    const timestamp = now.toISOString().slice(0, 19)
+
+    const lat = targetPrefs.lat || activeCustomer?.current_lat || activeCustomer?.home_lat || 12.93595
+    const lng = targetPrefs.lng || activeCustomer?.current_lng || activeCustomer?.home_lng || 77.62484
+
+    const results: any[] = []
+
+    for (const m of merchants) {
+      if (seq !== reqSeqRef.current) return // Cancel if newer request initiated
+      try {
+        const scenario = {
+          id: `storefront_${m.id}_${Date.now()}`,
+          customer_id: activeCustomer.id,
+          merchant_id: m.id,
+          timestamp,
+          lat: parseFloat(lat),
+          lng: parseFloat(lng),
+          minutes_available: targetPrefs.available_time,
+          wallet_override: targetPrefs.budget,
+          food_type: targetPrefs.food_type,
+          max_distance_m: targetPrefs.max_distance_m,
+          budget: targetPrefs.budget,
+          available_time: targetPrefs.available_time,
+          food_preference: targetPrefs.food_preference,
+          intent: [targetPrefs.intent, targetPrefs.food_preference !== 'anything' ? targetPrefs.food_preference : '', targetPrefs.food_type === 'veg' ? 'vegetarian' : ''].filter(Boolean).join(' '),
+        }
+        const res = await axios.post(`${API_BASE}/decide`, scenario)
+        if (res.data.action === 'send') {
+          results.push({ ...res.data, merchant: m, scenario_id: scenario.id })
+        }
+      } catch { /* skip */ }
+    }
+
+    if (seq === reqSeqRef.current) {
+      results.sort((a, b) => (b.decision_trace?.ranking_score || 0) - (a.decision_trace?.ranking_score || 0))
+      setRecommendations(results)
+      setAppliedPrefs(targetPrefs)
+      setRecLoading(false)
     }
   }
 
@@ -122,65 +198,25 @@ export default function CustomerStore({
     )
   }
 
-  const handleGetRecommendations = async () => {
-    if (!activeCustomer) return
-    setRecLoading(true)
-    setRecommendations([])
-
-    const now = new Date()
-    const timestamp = now.toISOString().slice(0, 19)
-
-    // Build lat/lng from customer or geo
-    const lat = prefs.lat || activeCustomer?.current_lat || activeCustomer?.home_lat || 12.93595
-    const lng = prefs.lng || activeCustomer?.current_lng || activeCustomer?.home_lng || 77.62484
-
-    // Map food_preference to merchant categories
-    const prefMap: Record<string, string[]> = {
-      'south_indian': ['restaurant', 'south_indian'],
-      'fast_food': ['fast_food', 'street_food'],
-      'healthy': ['healthy', 'salad'],
-      'cafe': ['cafe', 'beverage'],
-      'anything': [],
-    }
-    const preferredCategories = prefMap[prefs.food_preference] || []
-
-    // Decide which merchants are relevant
-    const relevantMerchants = merchants.filter(m => {
-      if (preferredCategories.length === 0) return true
-      const cat = (m.category || '').toLowerCase()
-      return preferredCategories.some(pc => cat.includes(pc))
-    })
-
-    const candidatesForDecide = (relevantMerchants.length > 0 ? relevantMerchants : merchants).slice(0, 8)
-    const results: any[] = []
-
-    for (const m of candidatesForDecide) {
-      try {
-        const scenario = {
-          id: `storefront_${m.id}_${Date.now()}`,
-          customer_id: activeCustomer.id,
-          merchant_id: m.id,
-          timestamp,
-          lat: parseFloat(lat),
-          lng: parseFloat(lng),
-          minutes_available: prefs.available_time,
-          wallet_override: prefs.budget,
-          food_type: prefs.food_type,
-          max_distance_m: prefs.max_distance_m,
-          budget: prefs.budget,
-          available_time: prefs.available_time,
-          intent: [prefs.intent, prefs.food_preference, prefs.food_type === 'veg' ? 'vegetarian' : ''].filter(Boolean).join(' '),
-        }
-        const res = await axios.post(`${API_BASE}/decide`, scenario)
-        if (res.data.action === 'send') {
-          results.push({ ...res.data, merchant: m, scenario_id: scenario.id })
-        }
-      } catch { /* skip failed merchants */ }
-    }
-
-    setRecommendations(results)
-    setRecLoading(false)
+  const handleGetRecommendations = () => {
+    fetchRecommendations(prefs)
     setCravingOpen(false)
+  }
+
+  const handleResetFilters = () => {
+    const defaultPrefs = {
+      food_preference: 'anything',
+      budget: 500,
+      available_time: 60,
+      food_type: 'both',
+      max_distance_m: 9999,
+      intent: '',
+      lat: '',
+      lng: '',
+      locality: activeCustomer?.locality || 'Koramangala'
+    }
+    setPrefs(defaultPrefs)
+    fetchRecommendations(defaultPrefs)
   }
 
   const handleOfferResponse = async (rec: any, action: 'accepted' | 'rejected') => {
@@ -215,7 +251,7 @@ export default function CustomerStore({
     }
   }
 
-  // Filter merchants for display
+  // Filter merchants dynamically using applied preferences
   const filteredMerchants = merchants.filter(m => {
     const cat = (m.category || '').toLowerCase()
     const name = (m.name || '').toLowerCase()
@@ -223,6 +259,29 @@ export default function CustomerStore({
 
     const catMatch = category === 'all' || cat.includes(category.replace('_', ' '))
     const searchMatch = !searchQ || name.includes(searchQ.toLowerCase()) || cat.includes(searchQ.toLowerCase()) || loc.includes(searchQ.toLowerCase())
+    
+    // Preference filters
+    if (appliedPrefs) {
+      if (appliedPrefs.food_preference !== 'anything') {
+        const prefMap: Record<string, string[]> = {
+          'south_indian': ['restaurant', 'south_indian'],
+          'fast_food': ['fast_food', 'street_food', 'burger'],
+          'healthy': ['healthy', 'salad'],
+          'cafe': ['cafe', 'beverage']
+        }
+        const allowed = prefMap[appliedPrefs.food_preference] || [appliedPrefs.food_preference]
+        if (!allowed.some(a => cat.includes(a))) return false
+      }
+
+      // Check if merchant catalog has items meeting budget & veg requirements
+      const mItems = catalog.filter(i => i.merchant_id === m.id && i.stock_units > 0)
+      if (mItems.length > 0) {
+        if (appliedPrefs.food_type === 'veg' && !mItems.some(i => i.is_veg === 1)) return false
+        if (appliedPrefs.food_type === 'non_veg' && !mItems.some(i => i.is_veg === 0)) return false
+        if (appliedPrefs.budget && !mItems.some(i => i.price_inr <= appliedPrefs.budget)) return false
+      }
+    }
+
     return catMatch && searchMatch
   })
 
@@ -240,53 +299,203 @@ export default function CustomerStore({
       {/* ── HERO BANNER ── */}
       <div className="bitezy-hero">
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 24px' }}>
-          <div style={{ maxWidth: 680 }}>
-            <h1 style={{ fontSize: 40, fontWeight: 900, lineHeight: 1.15, marginBottom: 12 }}>
-              Discover your next{' '}
-              <span style={{ color: 'var(--bitezy-red)' }}>craving</span>
-            </h1>
-            <p style={{ fontSize: 17, color: 'var(--text-secondary)', marginBottom: 24 }}>
-              AI-powered personalized deals from cafés and restaurants near you in Bengaluru.
-            </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20 }}>
+            <div style={{ maxWidth: 680, flex: 1 }}>
+              <h1 style={{ fontSize: 40, fontWeight: 900, lineHeight: 1.15, marginBottom: 12 }}>
+                Discover your next{' '}
+                <span style={{ color: 'var(--bitezy-red)' }}>craving</span>
+              </h1>
+              <p style={{ fontSize: 17, color: 'var(--text-secondary)', marginBottom: 24 }}>
+                AI-powered personalized deals from cafés and restaurants near you in Bengaluru.
+              </p>
 
-            {/* Search bar */}
-            <div className="search-bar" style={{ marginBottom: 20, maxWidth: 560 }}>
-              <Search size={18} style={{ marginLeft: 16, color: 'var(--text-muted)', flexShrink: 0 }} />
-              <input
-                value={searchQ}
-                onChange={e => setSearchQ(e.target.value)}
-                placeholder="Search for cafes, dishes, categories…"
-                style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 15, padding: '13px 14px' }}
-              />
-              {searchQ && (
-                <button onClick={() => setSearchQ('')} style={{ background: 'none', border: 'none', padding: '0 12px', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                  <X size={16} />
-                </button>
-              )}
-            </div>
-
-            {/* Location & CTA row */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '8px 14px' }}>
-                <MapPin size={16} style={{ color: 'var(--bitezy-red)', flexShrink: 0 }} />
-                <select
-                  value={selectedLocality}
-                  onChange={e => setSelectedLocality(e.target.value)}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 14, fontWeight: 600, cursor: 'pointer', outline: 'none', width: 'auto', padding: 0 }}
-                >
-                  {LOCALITIES.map(l => <option key={l}>{l}, Bengaluru</option>)}
-                </select>
+              {/* Search bar */}
+              <div className="search-bar" style={{ marginBottom: 20, maxWidth: 560 }}>
+                <Search size={18} style={{ marginLeft: 16, color: 'var(--text-muted)', flexShrink: 0 }} />
+                <input
+                  value={searchQ}
+                  onChange={e => setSearchQ(e.target.value)}
+                  placeholder="Search for cafes, dishes, categories…"
+                  style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 15, padding: '13px 14px' }}
+                />
+                {searchQ && (
+                  <button onClick={() => setSearchQ('')} style={{ background: 'none', border: 'none', padding: '0 12px', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                    <X size={16} />
+                  </button>
+                )}
               </div>
 
-              <button className="btn btn-primary btn-lg" onClick={() => setCravingOpen(true)} style={{ gap: 8 }}>
-                <Zap size={16} /> What are you craving?
+              {/* Location & CTA row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '8px 14px' }}>
+                  <MapPin size={16} style={{ color: 'var(--bitezy-red)', flexShrink: 0 }} />
+                  <select
+                    value={selectedLocality}
+                    onChange={e => setSelectedLocality(e.target.value)}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 14, fontWeight: 600, cursor: 'pointer', outline: 'none', width: 'auto', padding: 0 }}
+                  >
+                    {LOCALITIES.map(l => <option key={l}>{l}, Bengaluru</option>)}
+                  </select>
+                </div>
+
+                <button className="btn btn-primary btn-lg" onClick={() => setCravingOpen(true)} style={{ gap: 8 }}>
+                  <Zap size={16} /> What are you craving?
+                </button>
+
+                <button className="btn btn-ghost btn-lg" onClick={() => setShowMap(s => !s)} style={{ gap: 8 }}>
+                  <MapIcon size={16} /> {showMap ? 'Hide Map' : 'Show Map'}
+                </button>
+              </div>
+            </div>
+
+            {/* Notification Bell */}
+            <div style={{ position: 'relative', flexShrink: 0, marginTop: 8 }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => { setNotifDrawerOpen(o => !o); refreshActiveOffers() }}
+                style={{ position: 'relative', padding: '10px 14px' }}
+              >
+                <Bell size={22} />
+                {activeOffers.filter(o => !readOfferIds.has(o.id)).length > 0 && (
+                  <span style={{
+                    position: 'absolute', top: 4, right: 4,
+                    background: 'var(--bitezy-red)', color: '#fff',
+                    borderRadius: '50%', width: 18, height: 18,
+                    fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 800, border: '2px solid var(--bg-primary)'
+                  }}>
+                    {activeOffers.filter(o => !readOfferIds.has(o.id)).length}
+                  </span>
+                )}
               </button>
+
+              {/* Notification Drawer */}
+              {notifDrawerOpen && (
+                <div style={{
+                  position: 'absolute', top: '110%', right: 0, zIndex: 900,
+                  width: 340, maxHeight: 480, overflowY: 'auto',
+                  background: 'var(--bg-card)', border: '1px solid var(--border-default)',
+                  borderRadius: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+                  animation: 'slideDown 0.2s ease'
+                }}>
+                  <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-default)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 800, fontSize: 15 }}>🔔 Live Offers</span>
+                    <button onClick={() => setNotifDrawerOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={16} /></button>
+                  </div>
+                  {activeOffers.length === 0 ? (
+                    <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                      No live offers right now. Check back soon!
+                    </div>
+                  ) : (
+                    activeOffers.map(offer => {
+                      const isUnread = !readOfferIds.has(offer.id)
+                      const merch = merchants.find(m => m.id === offer.merchant_id)
+                      return (
+                        <div
+                          key={offer.id}
+                          onClick={() => setReadOfferIds(s => new Set([...s, offer.id]))}
+                          style={{
+                            padding: '12px 18px', borderBottom: '1px solid var(--border-default)',
+                            cursor: 'pointer', background: isUnread ? 'rgba(226,55,68,0.04)' : 'transparent',
+                            transition: 'background 0.2s'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{offer.title}</div>
+                            {isUnread && <div style={{ width: 8, height: 8, background: 'var(--bitezy-red)', borderRadius: '50%', flexShrink: 0, marginTop: 4 }} />}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{merch?.name || offer.merchant_id}</div>
+                          <div style={{ fontSize: 12, color: 'var(--bitezy-red)', fontWeight: 700 }}>{offer.discount_pct}% OFF · ₹{offer.final_price_inr}</div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       <div className="page-body">
+
+        {/* ── ACTIVE CRAVING FILTERS BAR ── */}
+        {appliedPrefs && (
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)', borderRadius: 12, padding: '12px 18px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Active Cravings:</span>
+              {appliedPrefs.food_preference !== 'anything' && <span className="chip active">Cuisine: {appliedPrefs.food_preference}</span>}
+              {appliedPrefs.budget && <span className="chip active">Max ₹{appliedPrefs.budget}</span>}
+              {appliedPrefs.food_type !== 'both' && <span className="chip active">{appliedPrefs.food_type === 'veg' ? '🌱 Veg Only' : '🍖 Non-Veg'}</span>}
+              {appliedPrefs.available_time && <span className="chip active">⏳ {appliedPrefs.available_time} min</span>}
+              {appliedPrefs.max_distance_m < 9999 && <span className="chip active">📍 Within {appliedPrefs.max_distance_m}m</span>}
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={handleResetFilters} style={{ gap: 4 }}>
+              <X size={13} /> Reset Filters
+            </button>
+          </div>
+        )}
+
+        {/* ── INTERACTIVE MAP ── */}
+        {showMap && (
+          <section style={{ marginBottom: 32 }} className="fade-in">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <MapIcon size={20} style={{ color: 'var(--bitezy-red)' }} />
+                Nearby Merchants &amp; Live Offers
+              </h2>
+              <button className="btn btn-ghost btn-sm" onClick={refreshActiveOffers}>
+                <Loader2 size={13} /> Refresh
+              </button>
+            </div>
+            <BitezyMap
+              merchants={merchants}
+              activeOffers={activeOffers}
+              locality={selectedLocality}
+              maxDistanceM={appliedPrefs?.max_distance_m || 2000}
+              onMerchantClick={openMerchant}
+            />
+          </section>
+        )}
+
+        {/* ── MERCHANT-PUBLISHED OFFER FEED ── */}
+        {activeOffers.length > 0 && (
+          <section style={{ marginBottom: 36 }} className="fade-in">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Zap size={20} style={{ color: '#f39c12' }} />
+                Newly Published Offers
+              </h2>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{activeOffers.length} live offer{activeOffers.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 8 }}>
+              {activeOffers.map(offer => {
+                const merch = merchants.find(m => m.id === offer.merchant_id)
+                return (
+                  <div
+                    key={offer.id}
+                    className="card card-hover"
+                    style={{ minWidth: 240, maxWidth: 260, flexShrink: 0, padding: 0, overflow: 'hidden', cursor: 'pointer' }}
+                    onClick={() => merch && openMerchant(merch)}
+                  >
+                    <div style={{ background: 'linear-gradient(135deg,#e23744,#c0392b)', padding: '16px 18px', color: '#fff' }}>
+                      <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>{offer.title}</div>
+                      <div style={{ fontSize: 22, fontWeight: 900 }}>₹{offer.final_price_inr} <span style={{ textDecoration: 'line-through', opacity: 0.6, fontSize: 14, fontWeight: 400 }}>₹{offer.base_price_inr}</span></div>
+                    </div>
+                    <div style={{ padding: '12px 18px' }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{merch?.name || offer.merchant_id}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 10 }}>
+                        <span>🏷️ {offer.discount_pct}% off</span>
+                        <span>⏱️ {offer.valid_minutes} min</span>
+                        <span>🎟️ {offer.redemptions}/{offer.max_redemptions}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
 
         {/* ── RECOMMENDATIONS (if any) ── */}
         {recommendations.length > 0 && (

@@ -105,7 +105,8 @@ _custom_store_file = DATA_DIR / 'custom_store.json'
 _custom_data = {
     'customers': {},
     'merchants': {},
-    'offer_responses': []
+    'offer_responses': [],
+    'offers': {}
 }
 
 def _load_custom_store():
@@ -261,10 +262,20 @@ def update_customer_profile(customer_id: str, updates: dict) -> dict:
         
     return sanitize_customer_record(cust)
 
+def sanitize_merchant_record(merch: dict) -> dict:
+    if not merch:
+        return None
+    res = dict(merch)
+    res.pop('password_hash', None)
+    return sanitize_json_obj(res)
+
 def register_merchant(merch_data: dict) -> dict:
     email = merch_data.get('email', '').strip().lower()
     if not email:
         raise ValueError("Email is required")
+    password = merch_data.get('password', '')
+    if not password or len(password) < 6:
+        raise ValueError("Password must be at least 6 characters long")
         
     for m in _custom_data['merchants'].values():
         if m.get('email') == email:
@@ -273,9 +284,12 @@ def register_merchant(merch_data: dict) -> dict:
     merch_id = f"m_reg_{len(_custom_data['merchants']) + 1:03d}"
     record = {
         'id': merch_id,
+        'owner_name': merch_data.get('owner_name', merch_data.get('name', 'Partner Owner')),
         'name': merch_data.get('name', 'Partner Cafe'),
         'email': email,
-        'password_hash': hash_password(merch_data.get('password', '123456')),
+        'phone': merch_data.get('phone', ''),
+        'address': merch_data.get('address', ''),
+        'password_hash': hash_password(password),
         'category': merch_data.get('category', 'cafe'),
         'locality': merch_data.get('locality', 'Koramangala'),
         'lat': float(merch_data.get('lat', 12.93595)),
@@ -301,23 +315,37 @@ def register_merchant(merch_data: dict) -> dict:
     data['merchants'][merch_id] = record
     data['merchant_catalog'][merch_id] = []
     
-    return sanitize_json_obj(record)
+    token = create_session(merch_id, 'merchant')
+    return {
+        'token': token,
+        'merchant': sanitize_merchant_record(record)
+    }
 
 def login_merchant(email: str, password: str) -> dict:
     email = email.strip().lower()
+    if not email or not password:
+        raise ValueError("Email and password are required")
     hashed = hash_password(password)
     
     for m in _custom_data['merchants'].values():
         if m.get('email') == email:
             if m.get('password_hash') == hashed:
-                return sanitize_json_obj(m)
+                token = create_session(m['id'], 'merchant')
+                return {
+                    'token': token,
+                    'merchant': sanitize_merchant_record(m)
+                }
             else:
-                raise ValueError("Invalid credentials")
+                raise ValueError("Invalid password")
                 
     data = get_data()
     for m in data['merchants'].values():
         if m.get('id') == email or m.get('name', '').lower() == email:
-            return sanitize_json_obj(m)
+            token = create_session(m['id'], 'merchant')
+            return {
+                'token': token,
+                'merchant': sanitize_merchant_record(m)
+            }
             
     raise ValueError("Merchant account not found")
 
@@ -409,4 +437,148 @@ def delete_merchant_item(merchant_id, item_id):
             data['merchant_catalog'][merchant_id] = [i for i in data['merchant_catalog'][merchant_id] if i['id'] != item_id]
         return True
     return False
+
+
+# ── Offer management ────────────────────────────────────────────────────────
+
+def _validate_offer(merchant_id: str, offer_data: dict) -> None:
+    """Raise ValueError if the offer violates guardrails."""
+    data = get_data()
+    merch = data['merchants'].get(merchant_id)
+    if not merch:
+        raise ValueError("Merchant not found")
+
+    discount_pct = float(offer_data.get('discount_pct', 0))
+    max_disc = float(merch.get('max_discount_pct', 100))
+    if discount_pct > max_disc + 0.5:
+        raise ValueError(
+            f"Discount {discount_pct}% exceeds merchant max {max_disc}%"
+        )
+
+    base_price = float(offer_data.get('base_price_inr', merch.get('base_price_inr', 200)))
+    unit_cost  = float(offer_data.get('unit_cost_inr',  merch.get('unit_cost_inr',  80)))
+    min_margin = float(merch.get('min_margin_pct', 0))
+    final_price = base_price * (1 - discount_pct / 100)
+    min_allowed = unit_cost * (1 + min_margin / 100)
+    if final_price < min_allowed:
+        raise ValueError(
+            f"Discounted price ₹{final_price:.0f} is below minimum margin "
+            f"(min ₹{min_allowed:.0f} for {min_margin}% margin)"
+        )
+
+    # Optional: check stock for a linked item
+    item_id = offer_data.get('item_id')
+    if item_id:
+        item = data['catalog'].get(item_id)
+        if item and int(item.get('stock_units', 0)) <= 0:
+            raise ValueError(f"Item {item_id} is out of stock")
+
+
+def create_offer(merchant_id: str, offer_data: dict) -> dict:
+    _validate_offer(merchant_id, offer_data)
+
+    offers = _custom_data.setdefault('offers', {})
+    offer_id = f"off_{merchant_id}_{len(offers) + 1:03d}"
+
+    data = get_data()
+    merch = data['merchants'].get(merchant_id, {})
+
+    base_price = float(offer_data.get('base_price_inr', merch.get('base_price_inr', 200)))
+    discount_pct = float(offer_data.get('discount_pct', 0))
+    final_price = round(base_price * (1 - discount_pct / 100), 2)
+
+    record = {
+        'id': offer_id,
+        'merchant_id': merchant_id,
+        'title': offer_data.get('title', 'Special Offer'),
+        'description': offer_data.get('description', ''),
+        'item_id': offer_data.get('item_id', ''),
+        'discount_pct': discount_pct,
+        'base_price_inr': base_price,
+        'final_price_inr': final_price,
+        'valid_minutes': int(offer_data.get('valid_minutes', 60)),
+        'max_redemptions': int(offer_data.get('max_redemptions', 100)),
+        'redemptions': 0,
+        'status': 'published',   # draft | published | paused
+        'created_at': datetime.now().isoformat(),
+        'expires_at': offer_data.get('expires_at', ''),
+    }
+
+    offers[offer_id] = record
+    _save_custom_store()
+    return record
+
+
+def update_offer(merchant_id: str, offer_id: str, offer_data: dict) -> dict:
+    offers = _custom_data.get('offers', {})
+    offer = offers.get(offer_id)
+    if not offer:
+        raise ValueError("Offer not found")
+    if offer['merchant_id'] != merchant_id:
+        raise ValueError("Forbidden: cannot edit another merchant's offer")
+
+    # Merge update fields
+    for k in ['title', 'description', 'discount_pct', 'valid_minutes', 'max_redemptions', 'status', 'expires_at', 'base_price_inr', 'item_id']:
+        if k in offer_data:
+            offer[k] = offer_data[k]
+
+    # Recalculate final price
+    base = float(offer.get('base_price_inr', 200))
+    disc = float(offer.get('discount_pct', 0))
+    offer['final_price_inr'] = round(base * (1 - disc / 100), 2)
+
+    # Re-validate after update
+    _validate_offer(merchant_id, offer)
+
+    _save_custom_store()
+    return offer
+
+
+def delete_offer(merchant_id: str, offer_id: str) -> bool:
+    offers = _custom_data.get('offers', {})
+    offer = offers.get(offer_id)
+    if not offer:
+        return False
+    if offer['merchant_id'] != merchant_id:
+        raise ValueError("Forbidden: cannot delete another merchant's offer")
+    del offers[offer_id]
+    _save_custom_store()
+    return True
+
+
+def toggle_offer_status(merchant_id: str, offer_id: str, status: str) -> dict:
+    """Set offer status to 'published' or 'paused'."""
+    offers = _custom_data.get('offers', {})
+    offer = offers.get(offer_id)
+    if not offer:
+        raise ValueError("Offer not found")
+    if offer['merchant_id'] != merchant_id:
+        raise ValueError("Forbidden")
+    if status not in ('published', 'paused', 'draft'):
+        raise ValueError("Invalid status")
+    offer['status'] = status
+    _save_custom_store()
+    return offer
+
+
+def get_merchant_offers(merchant_id: str) -> list:
+    offers = _custom_data.get('offers', {})
+    return [o for o in offers.values() if o['merchant_id'] == merchant_id]
+
+
+def get_active_published_offers() -> list:
+    """Return all published, non-expired, non-depleted offers."""
+    offers = _custom_data.get('offers', {})
+    now = datetime.now().isoformat()
+    result = []
+    for o in offers.values():
+        if o.get('status') != 'published':
+            continue
+        expires_at = o.get('expires_at', '')
+        if expires_at and expires_at < now:
+            continue
+        if o.get('redemptions', 0) >= o.get('max_redemptions', 100):
+            continue
+        result.append(o)
+    return result
 

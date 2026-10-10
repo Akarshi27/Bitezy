@@ -45,6 +45,20 @@ def decide(scenario: dict) -> dict:
     custom_budget = scenario.get('budget')
     if pd.notna(custom_budget) and float(custom_budget) > 0:
         customer['wallet_inr'] = float(custom_budget)
+
+    # Food preference category filter
+    food_pref = str(scenario.get('food_preference', 'anything')).lower()
+    if food_pref != 'anything':
+        pref_map = {
+            'south_indian': ['restaurant', 'south_indian'],
+            'fast_food': ['fast_food', 'street_food', 'burger'],
+            'healthy': ['healthy', 'salad'],
+            'cafe': ['cafe', 'beverage']
+        }
+        allowed = pref_map.get(food_pref, [food_pref])
+        m_cat = str(merchant.get('category', '')).lower()
+        if not any(a in m_cat for a in allowed):
+            return {"scenario_id": scenario['id'], "action": "skip", "reason": f"Merchant category '{m_cat}' does not match requested craving '{food_pref}'."}
             
     # 6. Hard constraints
     # - consent

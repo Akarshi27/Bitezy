@@ -35,6 +35,42 @@
       "price_sensitivity": 0.5,
       "avg_spend": 200.0,
       "visit_history": []
+    },
+    "c_reg_003": {
+      "id": "c_reg_003",
+      "name": "Akarshi Test",
+      "email": "test_user_1791619061968@bitezy.com",
+      "password_hash": "4dbd5e49147b5102ee2731ac03dd0db7decc3b8715c3df3c1f3ddc62dcbcf86d",
+      "language": "en",
+      "locality": "Indiranagar",
+      "marketing_consent": true,
+      "wallet_inr": 500.0,
+      "declared_preferences": "biryani,fast_food",
+      "food_type": "non_veg",
+      "budget": 450,
+      "max_distance_m": 2000,
+      "churn_risk": 0.1,
+      "price_sensitivity": 0.5,
+      "avg_spend": 200.0,
+      "visit_history": []
+    },
+    "c_reg_004": {
+      "id": "c_reg_004",
+      "name": "Akarshi Test",
+      "email": "test_user_1791619255722@bitezy.com",
+      "password_hash": "4dbd5e49147b5102ee2731ac03dd0db7decc3b8715c3df3c1f3ddc62dcbcf86d",
+      "language": "en",
+      "locality": "Indiranagar",
+      "marketing_consent": true,
+      "wallet_inr": 500.0,
+      "declared_preferences": "biryani,fast_food",
+      "food_type": "non_veg",
+      "budget": 450,
+      "max_distance_m": 2000,
+      "churn_risk": 0.1,
+      "price_sensitivity": 0.5,
+      "avg_spend": 200.0,
+      "visit_history": []
     }
   },
   "merchants": {},
@@ -56,6 +92,26 @@
       "customer_id": "c_001",
       "merchant_id": "m_001",
       "action": "accepted"
+    },
+    {
+      "offer_id": "off_test_acc_001",
+      "customer_id": "c_001",
+      "merchant_id": "m_001",
+      "action": "accepted"
+    },
+    {
+      "offer_id": "off_test_acc_001",
+      "customer_id": "c_001",
+      "merchant_id": "m_001",
+      "action": "accepted"
+    },
+    {
+      "offer_id": "item_l_120",
+      "customer_id": "c_reg_001",
+      "merchant_id": "m_l_MER-003",
+      "action": "accepted",
+      "discount_pct": 0,
+      "final_price_inr": 70
     }
   ]
 }

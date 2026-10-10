@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
+import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom'
 import axios from 'axios'
 
 import Navbar from './components/Navbar'
+import LandingRoleSelection from './pages/LandingRoleSelection'
+import AuthPages from './pages/AuthPages'
 import CustomerStore from './pages/CustomerStore'
 import MerchantPortal from './pages/MerchantPortal'
 import AdminDashboard from './pages/AdminDashboard'
@@ -16,6 +18,9 @@ function MainLayout() {
 
   const [customers, setCustomers] = useState<any[]>([])
   const [activeCustomer, setActiveCustomer] = useState<any | null>(null)
+  const [authRole, setAuthRole] = useState<'customer' | 'merchant' | null>(() => {
+    return (localStorage.getItem('bitezy_active_role') as any) || (localStorage.getItem('bitezy_customer_token') ? 'customer' : localStorage.getItem('bitezy_merchant_token') ? 'merchant' : null)
+  })
   
   const [cart, setCart] = useState<any[]>([])
   const [isCartOpen, setIsCartOpen] = useState(false)
@@ -29,12 +34,28 @@ function MainLayout() {
       const res = await axios.get(`${API_BASE}/data/customers`).catch(() => ({ data: [] }))
       if (Array.isArray(res.data) && res.data.length > 0) {
         setCustomers(res.data)
-        // Default active customer: Priya (c_020) or first customer
-        const priya = res.data.find((c: any) => c.id === 'c_020') || res.data[0]
-        setActiveCustomer(priya)
+        const savedCustData = localStorage.getItem('bitezy_customer_data')
+        if (savedCustData) {
+          try {
+            setActiveCustomer(JSON.parse(savedCustData))
+          } catch {
+            const priya = res.data.find((c: any) => c.id === 'c_020') || res.data[0]
+            setActiveCustomer(priya)
+          }
+        } else {
+          const priya = res.data.find((c: any) => c.id === 'c_020') || res.data[0]
+          setActiveCustomer(priya)
+        }
       }
     } catch (err) {
       console.error('Error fetching customers in App:', err)
+    }
+  }
+
+  const handleAuthSuccess = (user: any, role: 'customer' | 'merchant') => {
+    setAuthRole(role)
+    if (role === 'customer') {
+      setActiveCustomer(user)
     }
   }
 
@@ -51,24 +72,55 @@ function MainLayout() {
     setCart([])
   }
 
+  const isAuthRoute = ['/', '/login/customer', '/signup/customer', '/login/merchant', '/signup/merchant'].includes(location.pathname)
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-primary)' }}>
-      {/* Dual Interface Navbar Header */}
-      <Navbar
-        currentPath={location.pathname}
-        onNavigate={(path) => navigate(path)}
-        activeCustomer={activeCustomer}
-        customers={customers}
-        onSelectCustomer={(cust) => setActiveCustomer(cust)}
-        cartCount={cart.length}
-        onOpenCart={() => setIsCartOpen(true)}
-      />
+      {/* Navbar Header (shown on store, merchant, admin pages) */}
+      {!isAuthRoute && (
+        <Navbar
+          currentPath={location.pathname}
+          onNavigate={(path) => navigate(path)}
+          activeCustomer={activeCustomer}
+          customers={customers}
+          onSelectCustomer={(cust) => {
+            setActiveCustomer(cust)
+            localStorage.setItem('bitezy_customer_data', JSON.stringify(cust))
+          }}
+          cartCount={cart.length}
+          onOpenCart={() => setIsCartOpen(true)}
+        />
+      )}
 
       {/* Routes */}
       <div style={{ flex: 1 }}>
         <Routes>
           <Route
             path="/"
+            element={
+              authRole === 'customer' ? <Navigate to="/customer" replace /> :
+              authRole === 'merchant' ? <Navigate to="/merchant" replace /> :
+              <LandingRoleSelection />
+            }
+          />
+          <Route
+            path="/login/customer"
+            element={<AuthPages role="customer" mode="login" onAuthSuccess={handleAuthSuccess} />}
+          />
+          <Route
+            path="/signup/customer"
+            element={<AuthPages role="customer" mode="signup" onAuthSuccess={handleAuthSuccess} />}
+          />
+          <Route
+            path="/login/merchant"
+            element={<AuthPages role="merchant" mode="login" onAuthSuccess={handleAuthSuccess} />}
+          />
+          <Route
+            path="/signup/merchant"
+            element={<AuthPages role="merchant" mode="signup" onAuthSuccess={handleAuthSuccess} />}
+          />
+          <Route
+            path="/customer"
             element={
               <CustomerStore
                 activeCustomer={activeCustomer}

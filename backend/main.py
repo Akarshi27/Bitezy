@@ -5,7 +5,9 @@ from .data_loader import (
     get_offer_responses, add_merchant_item, update_merchant_item, delete_merchant_item,
     register_customer, login_customer, update_customer_profile,
     register_merchant, login_merchant, update_merchant_profile, get_customer,
-    get_user_id_from_token, destroy_session, sanitize_customer_record
+    get_user_id_from_token, destroy_session, sanitize_customer_record,
+    create_offer, update_offer, delete_offer, toggle_offer_status,
+    get_merchant_offers, get_active_published_offers
 )
 from .decision import decide
 from .analytics import compute_baseline_analytics
@@ -91,8 +93,29 @@ async def merch_login_endpoint(payload: dict):
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
 
+def require_merchant_id(authorization: str = Header(None)) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization token required")
+    merch_id = get_user_id_from_token(authorization)
+    if not merch_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token")
+    return merch_id
+
+@app.post('/auth/merchant/logout')
+async def merch_logout_endpoint(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization token required")
+    ok = destroy_session(authorization)
+    if not ok:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    return {"status": "logged_out"}
+
 @app.put('/merchant/me/{merchant_id}')
-async def update_merchant_profile_endpoint(merchant_id: str, payload: dict):
+async def update_merchant_profile_endpoint(merchant_id: str, payload: dict, authorization: str = Header(None)):
+    if authorization:
+        auth_id = require_merchant_id(authorization)
+        if auth_id != merchant_id:
+            raise HTTPException(status_code=403, detail="Forbidden: Cannot edit another merchant's profile")
     try:
         res = update_merchant_profile(merchant_id, payload)
         return res
@@ -198,4 +221,64 @@ async def run_evaluation():
     return {"status": "Evaluation should be run via CLI or batch_predict.py"}
 
 
+# ── Merchant Offer Management Routes ────────────────────────────────────────
 
+@app.get('/merchant/offers/{merchant_id}')
+async def list_merchant_offers(merchant_id: str):
+    return sanitize_json_obj(get_merchant_offers(merchant_id))
+
+
+@app.post('/merchant/offers/{merchant_id}')
+async def create_merchant_offer(merchant_id: str, offer_data: dict, authorization: str = Header(None)):
+    auth_id = require_merchant_id(authorization)
+    if auth_id != merchant_id:
+        raise HTTPException(status_code=403, detail="Forbidden: cannot publish offers for another merchant")
+    try:
+        offer = create_offer(merchant_id, offer_data)
+        return sanitize_json_obj(offer)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put('/merchant/offers/{merchant_id}/{offer_id}')
+async def update_merchant_offer(merchant_id: str, offer_id: str, offer_data: dict, authorization: str = Header(None)):
+    auth_id = require_merchant_id(authorization)
+    if auth_id != merchant_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        offer = update_offer(merchant_id, offer_id, offer_data)
+        return sanitize_json_obj(offer)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.patch('/merchant/offers/{merchant_id}/{offer_id}/status')
+async def set_offer_status(merchant_id: str, offer_id: str, payload: dict, authorization: str = Header(None)):
+    auth_id = require_merchant_id(authorization)
+    if auth_id != merchant_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        offer = toggle_offer_status(merchant_id, offer_id, payload.get('status', ''))
+        return sanitize_json_obj(offer)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete('/merchant/offers/{merchant_id}/{offer_id}')
+async def delete_merchant_offer(merchant_id: str, offer_id: str, authorization: str = Header(None)):
+    auth_id = require_merchant_id(authorization)
+    if auth_id != merchant_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        ok = delete_offer(merchant_id, offer_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Offer not found")
+        return {"status": "deleted"}
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
+@app.get('/offers/active')
+async def list_active_offers():
+    """Public endpoint: returns all live, published, non-expired offers for the customer feed."""
+    return sanitize_json_obj(get_active_published_offers())
