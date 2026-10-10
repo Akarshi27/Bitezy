@@ -1,11 +1,65 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .data_loader import get_data, sanitize_json_obj
+from .data_loader import (
+    get_data, sanitize_json_obj, record_offer_response,
+    get_offer_responses, add_merchant_item, update_merchant_item, delete_merchant_item,
+    register_customer, login_customer, update_customer_profile,
+    register_merchant, login_merchant, update_merchant_profile, get_customer
+)
 from .decision import decide
 from .analytics import compute_baseline_analytics
+from .model_scorer import train_and_evaluate_model
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'])
+
+@app.post('/auth/customer/register')
+async def cust_register_endpoint(payload: dict):
+    try:
+        res = register_customer(payload)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post('/auth/customer/login')
+async def cust_login_endpoint(payload: dict):
+    try:
+        res = login_customer(payload.get('email', ''), payload.get('password', ''))
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+@app.put('/customer/profile/{customer_id}')
+async def cust_profile_endpoint(customer_id: str, payload: dict):
+    try:
+        res = update_customer_profile(customer_id, payload)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post('/auth/merchant/register')
+async def merch_register_endpoint(payload: dict):
+    try:
+        res = register_merchant(payload)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post('/auth/merchant/login')
+async def merch_login_endpoint(payload: dict):
+    try:
+        res = login_merchant(payload.get('email', ''), payload.get('password', ''))
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+@app.put('/merchant/me/{merchant_id}')
+async def update_merchant_profile_endpoint(merchant_id: str, payload: dict):
+    try:
+        res = update_merchant_profile(merchant_id, payload)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post('/decide')
 async def decide_endpoint(scenario: dict):
@@ -39,8 +93,71 @@ async def get_catalog():
 async def get_baselines():
     return compute_baseline_analytics()
 
+@app.get('/model/train')
+async def train_model_endpoint():
+    return train_and_evaluate_model()
+
+@app.post('/offer/respond')
+async def respond_offer(payload: dict):
+    res = record_offer_response(payload)
+    return sanitize_json_obj({"status": "recorded", "data": res})
+
+@app.get('/offer/responses')
+async def list_offer_responses(merchant_id: str = None):
+    return sanitize_json_obj(get_offer_responses(merchant_id))
+
+@app.get('/merchant/me/{merchant_id}')
+async def get_merchant_profile(merchant_id: str):
+    data = get_data()
+    if merchant_id not in data['merchants']:
+        raise HTTPException(status_code=404, detail="Merchant not found")
+    return sanitize_json_obj(data['merchants'][merchant_id])
+
+@app.get('/merchant/menu/{merchant_id}')
+async def get_merchant_menu(merchant_id: str):
+    data = get_data()
+    items = data['merchant_catalog'].get(merchant_id, [])
+    return sanitize_json_obj(items)
+
+@app.post('/merchant/menu/{merchant_id}/add')
+async def add_menu_item(merchant_id: str, item_data: dict):
+    item = add_merchant_item(merchant_id, item_data)
+    return sanitize_json_obj(item)
+
+@app.put('/merchant/menu/{merchant_id}/item/{item_id}')
+async def update_menu_item(merchant_id: str, item_id: str, item_data: dict):
+    item = update_merchant_item(merchant_id, item_id, item_data)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return sanitize_json_obj(item)
+
+@app.delete('/merchant/menu/{merchant_id}/item/{item_id}')
+async def delete_menu_item(merchant_id: str, item_id: str):
+    ok = delete_merchant_item(merchant_id, item_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"status": "deleted"}
+
+@app.get('/merchant/analytics/{merchant_id}')
+async def get_merchant_analytics(merchant_id: str):
+    responses = get_offer_responses(merchant_id)
+    accepted = len([r for r in responses if r.get('action') == 'accepted'])
+    rejected = len([r for r in responses if r.get('action') == 'rejected'])
+    total = len(responses)
+    rate = round(accepted / max(1, total) * 100, 1) if total > 0 else 0.0
+
+    return sanitize_json_obj({
+        "merchant_id": merchant_id,
+        "offers_sent": total,
+        "accepted_count": accepted,
+        "rejected_count": rejected,
+        "acceptance_rate_pct": rate,
+        "responses": responses
+    })
+
 @app.get('/evaluate')
 async def run_evaluation():
     return {"status": "Evaluation should be run via CLI or batch_predict.py"}
+
 
 

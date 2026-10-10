@@ -38,6 +38,13 @@ def decide(scenario: dict) -> dict:
         f_end = parse(str(f['end_date'])).date()
         if f_start <= scenario_dt.date() <= f_end:
             active_fests.append(f)
+
+    # Custom Preference Overrides from Customer Input Form
+    max_dist_m = float(scenario.get('max_distance_m', 1500))
+    food_type = str(scenario.get('food_type', 'both')).lower()
+    custom_budget = scenario.get('budget')
+    if pd.notna(custom_budget) and float(custom_budget) > 0:
+        customer['wallet_inr'] = float(custom_budget)
             
     # 6. Hard constraints
     # - consent
@@ -58,7 +65,7 @@ def decide(scenario: dict) -> dict:
     m_lat = float(merchant['lat'])
     m_lng = float(merchant['lng'])
     
-    passed, reason, dist_m = check_distance(c_lat, c_lng, m_lat, m_lng, max_m=1500)
+    passed, reason, dist_m = check_distance(c_lat, c_lng, m_lat, m_lng, max_m=max_dist_m)
     if not passed: return {"scenario_id": scenario['id'], "action": "skip", "reason": reason}
     
     walk_minutes = int(dist_m / 80.0)
@@ -66,14 +73,22 @@ def decide(scenario: dict) -> dict:
     # 7. Catalog items
     items = data['merchant_catalog'].get(m_id, [])
     items = check_stock(items)
+
+    # Apply Dietary / Food Type Filter (veg / non_veg)
+    if food_type == 'veg':
+        items = [i for i in items if i.get('is_veg') == 1]
+    elif food_type == 'non_veg':
+        items = [i for i in items if i.get('is_veg') == 0]
     
     # 9. If no items
     if not items:
-        return {"scenario_id": scenario['id'], "action": "skip", "reason": "No items in stock."}
+        return {"scenario_id": scenario['id'], "action": "skip", "reason": f"No eligible items matching preferences ({food_type})."}
         
     # 10. Score and rank items
     best_item = None
     best_score = -float('inf')
+    best_sim = 0.0
+    best_ml_prob = 0.0
     for item in items:
         # Quick budget filter
         max_disc = merchant.get('max_discount_pct', 0)
@@ -87,15 +102,16 @@ def decide(scenario: dict) -> dict:
         passed_time, time_reason = check_time_feasibility(
             walk_minutes, 
             item.get('prep_minutes', 0), 
-            scenario.get('minutes_available')
+            scenario.get('available_time', scenario.get('minutes_available'))
         )
         if not passed_time:
             continue
             
-        score, sim = score_merchant_item(customer, merchant, item, dist_m, scenario, active_fests)
+        score, sim, ml_prob = score_merchant_item(customer, merchant, item, dist_m, scenario, active_fests)
         if score > best_score:
             best_score = score
             best_sim = sim
+            best_ml_prob = ml_prob
             best_item = item
             
     if not best_item:
@@ -121,9 +137,10 @@ def decide(scenario: dict) -> dict:
     
     # 14. Build response
     return {
+        "offer_id": f"off_{scenario['id']}",
         "scenario_id": scenario['id'],
         "action": "send",
-        "reason": f"Selected item {best_item['id']} with {opt_res['discount_pct']}% discount.",
+        "reason": f"Matches your selected cuisine and budget ({best_item['title']}).",
         "offer": {
             "merchant_id": m_id,
             "discount_pct": opt_res['discount_pct'],
@@ -146,6 +163,7 @@ def decide(scenario: dict) -> dict:
             "selected_item_id": best_item['id'],
             "ranking_score": round(best_score, 2),
             "semantic_similarity": round(best_sim, 3),
+            "ml_model_score": round(best_ml_prob, 4),
             "optimal_discount_pct": opt_res['discount_pct'],
             "expected_profit_inr": opt_res['profit_estimate_inr']
         }

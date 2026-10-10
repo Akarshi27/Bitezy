@@ -1,0 +1,12 @@
+{
+  "customers": {},
+  "merchants": {},
+  "offer_responses": [
+    {
+      "offer_id": "off_test_acc_001",
+      "customer_id": "c_001",
+      "merchant_id": "m_001",
+      "action": "accepted"
+    }
+  ]
+}

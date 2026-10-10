@@ -1,14 +1,17 @@
 import pandas as pd
 from typing import List, Dict, Tuple
 from .embeddings import get_semantic_score
+from .model_scorer import extract_features, score_candidate_ml
 
-def score_merchant_item(customer: dict, merchant: dict, item: dict, dist_m: float, scenario: dict, active_festivals: List[dict]) -> Tuple[float, float]:
+def score_merchant_item(customer: dict, merchant: dict, item: dict, dist_m: float, scenario: dict, active_festivals: List[dict]) -> Tuple[float, float, float]:
     score = 0.0
     
     # 1. Category preference match
     prefs = customer.get('declared_preferences', '')
+    cat_match = False
     if pd.notna(prefs) and str(merchant.get('category', '')) in str(prefs):
         score += 25.0
+        cat_match = True
         
     # 2. Distance score (linear decay, 0m=25pts, 1500m=0pts)
     dist_score = max(0, 25.0 * (1 - dist_m / 1500.0))
@@ -28,7 +31,6 @@ def score_merchant_item(customer: dict, merchant: dict, item: dict, dist_m: floa
         
     # 5. Festival boost
     for fest in active_festivals:
-        # Check if merchant category is in festival categories
         cats_str = fest.get('categories', '')
         if pd.notna(cats_str) and str(merchant.get('category', '')) in str(cats_str):
             boost = fest.get('boost_pct', 0)
@@ -52,17 +54,37 @@ def score_merchant_item(customer: dict, merchant: dict, item: dict, dist_m: floa
     )
     score += semantic_sim * 15.0
             
-    # 8. Churn uplift
-    churn = customer.get('churn_risk', 0)
-    if pd.isna(churn): churn = 0
+    # 8. PyTorch Tabular Model Score
+    churn = customer.get('churn_risk', 0.5)
+    if pd.isna(churn): churn = 0.5
+    
+    price = item.get('price_inr', 100)
+    budget = customer.get('wallet_inr', 500)
+    if pd.isna(budget): budget = 500.0
+
+    feats = extract_features(
+        semantic_sim=semantic_sim,
+        dist_m=dist_m,
+        max_dist_m=float(scenario.get('max_distance_m', 1500)),
+        price=float(price),
+        budget=float(budget),
+        occupancy_pct=float(occ),
+        churn_risk=float(churn),
+        min_margin_pct=float(merchant.get('min_margin_pct', 10)),
+        unit_cost=float(merchant.get('unit_cost_inr', 50)),
+        category_match=cat_match
+    )
+    ml_prob = score_candidate_ml(feats)
+    score += ml_prob * 10.0
+
+    # 9. Churn uplift
     score += float(churn) * 8.0
     
-    # 9. Price fit
-    wallet = customer.get('wallet_inr', 500)
-    price = item.get('price_inr', 0)
+    # 10. Price fit
     if price > 0:
-        pf = min(wallet / price, 1.0) * 5.0
+        pf = min(budget / price, 1.0) * 5.0
         score += pf
         
-    return score, semantic_sim
+    return score, semantic_sim, ml_prob
+
 

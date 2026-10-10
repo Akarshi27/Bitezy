@@ -4,6 +4,7 @@ import axios from 'axios'
 
 import Navbar from './components/Navbar'
 import CustomerStore from './pages/CustomerStore'
+import MerchantPortal from './pages/MerchantPortal'
 import AdminDashboard from './pages/AdminDashboard'
 import './App.css'
 
@@ -79,6 +80,10 @@ function MainLayout() {
                 onCloseCart={() => setIsCartOpen(false)}
               />
             }
+          />
+          <Route
+            path="/merchant"
+            element={<MerchantPortal />}
           />
           <Route
             path="/admin"

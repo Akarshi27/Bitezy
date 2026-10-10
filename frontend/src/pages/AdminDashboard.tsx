@@ -215,8 +215,8 @@ export default function AdminDashboard() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <h1>OfferIQ Admin</h1>
-          <p>Judge &amp; Intelligence Center</p>
+          <h1 style={{ color: 'var(--bitezy-red, #e23744)' }}>🔥 Bitezy</h1>
+          <p>AI Intelligence Center</p>
         </div>
 
         <nav className="sidebar-nav">
@@ -287,7 +287,7 @@ export default function AdminDashboard() {
               {activeTab === 'merchants' && 'Merchant Network Directory'}
               {activeTab === 'customers' && 'Customer Profiles & Preferences'}
             </h2>
-            <p>Bengaluru Hyperlocal Decisioned Offer Architecture</p>
+            <p>Bitezy · Bengaluru Hyperlocal AI Offer Architecture</p>
           </div>
 
           <button className="btn btn-ghost" onClick={fetchInitialData}>
@@ -562,7 +562,7 @@ export default function AdminDashboard() {
                       {/* Phone Content */}
                       <div style={{ padding: '20px' }}>
                         <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                          <span>OfferIQ Hyperlocal</span>
+                          <span>Bitezy AI</span>
                           <span className="badge badge-purple">{decisionResult.notification?.language || 'en'}</span>
                         </div>
 

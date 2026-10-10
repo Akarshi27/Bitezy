@@ -1,475 +1,706 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import {
-  Search,
-  Sparkles,
-  MapPin,
-  Clock,
-  Plus,
-  Check,
-  ShoppingBag,
-  Info,
-  X,
-  Zap,
-  Store,
-  Wallet
+  Search, MapPin, Star, Clock, Tag, ChevronRight, Zap, ShoppingBag,
+  X, Plus, Minus, RefreshCw, CheckCircle, XCircle, Leaf, Flame as FlameIcon,
+  SlidersHorizontal, Loader2
 } from 'lucide-react'
 
 const API_BASE = 'http://localhost:8000'
+
+const CATEGORIES = [
+  { key: 'all',         label: 'All',           emoji: '🍽️' },
+  { key: 'cafe',        label: 'Cafe',           emoji: '☕' },
+  { key: 'south_indian',label: 'South Indian',   emoji: '🥘' },
+  { key: 'fast_food',   label: 'Fast Food',      emoji: '🍔' },
+  { key: 'healthy',     label: 'Healthy',        emoji: '🥗' },
+  { key: 'dessert',     label: 'Desserts',       emoji: '🍰' },
+  { key: 'biryani',     label: 'Biryani',        emoji: '🍛' },
+  { key: 'street_food', label: 'Street Food',    emoji: '🌮' },
+]
+
+const LOCALITIES = [
+  'Koramangala', 'Indiranagar', 'HSR Layout', 'Whitefield',
+  'Marathahalli', 'BTM Layout', 'Jayanagar', 'Malleshwaram',
+]
 
 interface CustomerStoreProps {
   activeCustomer: any
   cart: any[]
   onAddToCart: (item: any, discountPct?: number) => void
-  onRemoveFromCart: (itemId: string) => void
+  onRemoveFromCart: (id: string) => void
   onClearCart: () => void
   isCartOpen: boolean
   onCloseCart: () => void
 }
 
 export default function CustomerStore({
-  activeCustomer,
-  cart,
-  onAddToCart,
-  onRemoveFromCart,
-  onClearCart,
-  isCartOpen,
-  onCloseCart
+  activeCustomer, cart, onAddToCart, onRemoveFromCart, onClearCart, isCartOpen, onCloseCart
 }: CustomerStoreProps) {
+  const [merchants, setMerchants] = useState<any[]>([])
   const [catalog, setCatalog] = useState<any[]>([])
-  const [merchants, setMerchants] = useState<Record<string, any>>({})
-  const [scenarios, setScenarios] = useState<any[]>([])
-  
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState('all')
-  const [vegOnly, setVegOnly] = useState(false)
-  
-  const [activeOfferDecision, setActiveOfferDecision] = useState<any | null>(null)
-  const [loadingOffer, setLoadingOffer] = useState(false)
-  
-  const [selectedProductDetail, setSelectedProductDetail] = useState<any | null>(null)
-  const [checkoutComplete, setCheckoutComplete] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [category, setCategory] = useState('all')
+  const [searchQ, setSearchQ] = useState('')
+
+  // Craving modal
+  const [cravingOpen, setCravingOpen] = useState(false)
+  const [prefs, setPrefs] = useState({
+    food_preference: 'anything',
+    budget: 300,
+    available_time: 30,
+    food_type: 'both',
+    max_distance_m: 2000,
+    intent: '',
+    lat: '',
+    lng: '',
+    locality: '',
+  })
+  const [recLoading, setRecLoading] = useState(false)
+  const [recommendations, setRecommendations] = useState<any[]>([])
+  const [geoStatus, setGeoStatus] = useState<'idle' | 'requesting' | 'ok' | 'denied'>('idle')
+
+  // Restaurant detail modal
+  const [selectedMerchant, setSelectedMerchant] = useState<any>(null)
+  const [merchantItems, setMerchantItems] = useState<any[]>([])
+  const [merchantLoading, setMerchantLoading] = useState(false)
+
+  // Location
+  const [selectedLocality, setSelectedLocality] = useState(activeCustomer?.locality || 'Koramangala')
+
+  // Checkout
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
+  const [checkoutDone, setCheckoutDone] = useState(false)
+
+  // Response record
+  const [respondedOffers, setRespondedOffers] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetchData()
   }, [])
 
   useEffect(() => {
-    if (activeCustomer && scenarios.length > 0) {
-      // Find matching scenario for this customer or default to cur_001
-      const sc = scenarios.find(s => s.customer_id === activeCustomer.id) || scenarios[0]
-      if (sc) runDecision(sc)
+    if (activeCustomer?.locality) setSelectedLocality(activeCustomer.locality)
+    if (activeCustomer?.declared_preferences) {
+      const pref = activeCustomer.declared_preferences
+      setPrefs(p => ({
+        ...p,
+        food_preference: pref.includes('south_indian') ? 'south_indian'
+          : pref.includes('fast_food') ? 'fast_food'
+          : pref.includes('healthy') ? 'healthy'
+          : pref.includes('cafe') ? 'cafe' : 'anything',
+        budget: activeCustomer.wallet_inr || 300,
+        locality: activeCustomer.locality || '',
+      }))
     }
-  }, [activeCustomer, scenarios])
+  }, [activeCustomer])
 
   const fetchData = async () => {
+    setLoading(true)
     try {
-      const [catRes, mRes, scRes] = await Promise.all([
-        axios.get(`${API_BASE}/data/catalog`).catch(() => ({ data: [] })),
+      const [mRes, cRes] = await Promise.all([
         axios.get(`${API_BASE}/data/merchants`).catch(() => ({ data: [] })),
-        axios.get(`${API_BASE}/data/scenarios`).catch(() => ({ data: [] }))
+        axios.get(`${API_BASE}/data/catalog`).catch(() => ({ data: [] }))
       ])
-
-      if (Array.isArray(catRes.data)) setCatalog(catRes.data)
-      
-      if (Array.isArray(mRes.data)) {
-        const mObj: Record<string, any> = {}
-        mRes.data.forEach((m: any) => { mObj[m.id] = m })
-        setMerchants(mObj)
-      }
-
-      if (Array.isArray(scRes.data)) setScenarios(scRes.data)
-
-    } catch (err) {
-      console.error('Error loading store data:', err)
-    }
-  }
-
-  const runDecision = async (scenario: any) => {
-    setLoadingOffer(true)
-    try {
-      const res = await axios.post(`${API_BASE}/decide`, scenario)
-      setActiveOfferDecision(res.data)
-    } catch (err) {
-      console.error('Error fetching decision offer for store:', err)
+      setMerchants(Array.isArray(mRes.data) ? mRes.data : [])
+      setCatalog(Array.isArray(cRes.data) ? cRes.data : [])
     } finally {
-      setLoadingOffer(false)
+      setLoading(false)
     }
   }
 
-  // Filter products
-  const filteredCatalog = catalog.filter(item => {
-    const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          (item.tags && item.tags.toLowerCase().includes(searchQuery.toLowerCase()))
-    
-    const matchesCategory = selectedCategory === 'all' || 
-                            item.category.toLowerCase().includes(selectedCategory.toLowerCase())
-    
-    const matchesVeg = !vegOnly || item.is_veg === 1
+  const requestGeo = () => {
+    setGeoStatus('requesting')
+    if (!navigator.geolocation) { setGeoStatus('denied'); return }
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setPrefs(p => ({ ...p, lat: pos.coords.latitude.toString(), lng: pos.coords.longitude.toString() }))
+        setGeoStatus('ok')
+      },
+      () => setGeoStatus('denied'),
+      { timeout: 8000 }
+    )
+  }
 
-    return matchesSearch && matchesCategory && matchesVeg
+  const handleGetRecommendations = async () => {
+    if (!activeCustomer) return
+    setRecLoading(true)
+    setRecommendations([])
+
+    const now = new Date()
+    const timestamp = now.toISOString().slice(0, 19)
+
+    // Build lat/lng from customer or geo
+    const lat = prefs.lat || activeCustomer?.current_lat || activeCustomer?.home_lat || 12.93595
+    const lng = prefs.lng || activeCustomer?.current_lng || activeCustomer?.home_lng || 77.62484
+
+    // Map food_preference to merchant categories
+    const prefMap: Record<string, string[]> = {
+      'south_indian': ['restaurant', 'south_indian'],
+      'fast_food': ['fast_food', 'street_food'],
+      'healthy': ['healthy', 'salad'],
+      'cafe': ['cafe', 'beverage'],
+      'anything': [],
+    }
+    const preferredCategories = prefMap[prefs.food_preference] || []
+
+    // Decide which merchants are relevant
+    const relevantMerchants = merchants.filter(m => {
+      if (preferredCategories.length === 0) return true
+      const cat = (m.category || '').toLowerCase()
+      return preferredCategories.some(pc => cat.includes(pc))
+    })
+
+    const candidatesForDecide = (relevantMerchants.length > 0 ? relevantMerchants : merchants).slice(0, 8)
+    const results: any[] = []
+
+    for (const m of candidatesForDecide) {
+      try {
+        const scenario = {
+          id: `storefront_${m.id}_${Date.now()}`,
+          customer_id: activeCustomer.id,
+          merchant_id: m.id,
+          timestamp,
+          lat: parseFloat(lat),
+          lng: parseFloat(lng),
+          minutes_available: prefs.available_time,
+          wallet_override: prefs.budget,
+          food_type: prefs.food_type,
+          max_distance_m: prefs.max_distance_m,
+          budget: prefs.budget,
+          available_time: prefs.available_time,
+          intent: [prefs.intent, prefs.food_preference, prefs.food_type === 'veg' ? 'vegetarian' : ''].filter(Boolean).join(' '),
+        }
+        const res = await axios.post(`${API_BASE}/decide`, scenario)
+        if (res.data.action === 'send') {
+          results.push({ ...res.data, merchant: m, scenario_id: scenario.id })
+        }
+      } catch { /* skip failed merchants */ }
+    }
+
+    setRecommendations(results)
+    setRecLoading(false)
+    setCravingOpen(false)
+  }
+
+  const handleOfferResponse = async (rec: any, action: 'accepted' | 'rejected') => {
+    const offerId = rec.offer?.item_id || rec.scenario_id
+    if (respondedOffers.has(offerId)) return
+    setRespondedOffers(prev => new Set([...prev, offerId]))
+
+    try {
+      await axios.post(`${API_BASE}/offer/respond`, {
+        offer_id: offerId,
+        customer_id: activeCustomer?.id,
+        merchant_id: rec.offer?.merchant_id,
+        action,
+        discount_pct: rec.offer?.discount_pct,
+        final_price_inr: rec.offer?.final_price_inr,
+      })
+      if (action === 'accepted' && rec.offer) {
+        const item = catalog.find(i => i.id === rec.offer.item_id)
+        if (item) onAddToCart({ ...item, price_inr: rec.offer.final_price_inr }, rec.offer.discount_pct)
+      }
+    } catch { /* best effort */ }
+  }
+
+  const openMerchant = async (m: any) => {
+    setSelectedMerchant(m)
+    setMerchantLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/merchant/menu/${m.id}`)
+      setMerchantItems(Array.isArray(res.data) ? res.data : [])
+    } finally {
+      setMerchantLoading(false)
+    }
+  }
+
+  // Filter merchants for display
+  const filteredMerchants = merchants.filter(m => {
+    const cat = (m.category || '').toLowerCase()
+    const name = (m.name || '').toLowerCase()
+    const loc = (m.locality || '').toLowerCase()
+
+    const catMatch = category === 'all' || cat.includes(category.replace('_', ' '))
+    const searchMatch = !searchQ || name.includes(searchQ.toLowerCase()) || cat.includes(searchQ.toLowerCase()) || loc.includes(searchQ.toLowerCase())
+    return catMatch && searchMatch
   })
 
-  // Cart total calculations
-  const subtotal = cart.reduce((acc, item) => {
-    const finalPrice = item.discountPct ? item.price_inr * (1 - item.discountPct / 100) : item.price_inr
-    return acc + finalPrice
+  // Cart totals
+  const cartSubtotal = cart.reduce((acc, item) => acc + (item.price_inr || 0), 0)
+  const cartSavings = cart.reduce((acc, item) => {
+    const original = catalog.find(c => c.id === item.id)
+    if (original && original.price_inr > item.price_inr) return acc + (original.price_inr - item.price_inr)
+    return acc
   }, 0)
 
-  const handleCheckout = () => {
-    setCheckoutComplete(true)
-    setTimeout(() => {
-      onClearCart()
-      setCheckoutComplete(false)
-      onCloseCart()
-    }, 2500)
-  }
-
   return (
-    <div className="page-body fade-in" style={{ paddingBottom: '60px' }}>
-      {/* Customer Persona & Location Greeting */}
-      <div className="card" style={{ marginBottom: '20px', background: 'linear-gradient(135deg, #162032 0%, #0d1424 100%)', borderColor: 'rgba(59,130,246,0.3)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: 800 }}>
-                Welcome, {activeCustomer?.name || 'Customer'}!
-              </h2>
-              <span className="badge badge-purple">{activeCustomer?.language || 'en'}</span>
-            </div>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              Hyperlocal Bengaluru Deals &bull; {activeCustomer?.locality || 'Indiranagar'}
+    <div style={{ minHeight: 'calc(100vh - 60px)' }}>
+
+      {/* ── HERO BANNER ── */}
+      <div className="bitezy-hero">
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 24px' }}>
+          <div style={{ maxWidth: 680 }}>
+            <h1 style={{ fontSize: 40, fontWeight: 900, lineHeight: 1.15, marginBottom: 12 }}>
+              Discover your next{' '}
+              <span style={{ color: 'var(--bitezy-red)' }}>craving</span>
+            </h1>
+            <p style={{ fontSize: 17, color: 'var(--text-secondary)', marginBottom: 24 }}>
+              AI-powered personalized deals from cafés and restaurants near you in Bengaluru.
             </p>
-          </div>
 
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center', fontSize: '13px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Wallet size={16} style={{ color: 'var(--accent-green)' }} />
-              <span>Wallet: <strong>₹{activeCustomer?.wallet_inr || 500}</strong></span>
+            {/* Search bar */}
+            <div className="search-bar" style={{ marginBottom: 20, maxWidth: 560 }}>
+              <Search size={18} style={{ marginLeft: 16, color: 'var(--text-muted)', flexShrink: 0 }} />
+              <input
+                value={searchQ}
+                onChange={e => setSearchQ(e.target.value)}
+                placeholder="Search for cafes, dishes, categories…"
+                style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 15, padding: '13px 14px' }}
+              />
+              {searchQ && (
+                <button onClick={() => setSearchQ('')} style={{ background: 'none', border: 'none', padding: '0 12px', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  <X size={16} />
+                </button>
+              )}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span className={`badge ${activeCustomer?.marketing_consent ? 'badge-green' : 'badge-red'}`}>
-                {activeCustomer?.marketing_consent ? 'Marketing Opted-In' : 'Consent Opted-Out'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* AI Decision Engine Offer Banner (Dynamic from FastAPI /decide) */}
-      {loadingOffer ? (
-        <div className="card" style={{ padding: '20px', textAlign: 'center', marginBottom: '24px', color: 'var(--text-muted)' }}>
-          <Sparkles className="spinner" size={24} style={{ marginBottom: '8px' }} />
-          <p>Evaluating AI decision engine offers for your location...</p>
-        </div>
-      ) : activeOfferDecision && activeOfferDecision.action === 'send' && activeOfferDecision.offer ? (
-        <div className="offer-card" style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                <span className="badge badge-green"><Sparkles size={11} /> AI Decisioned Hyperlocal Offer</span>
-                <span className="badge badge-amber font-mono">-{activeOfferDecision.offer.discount_pct}% OFF</span>
+            {/* Location & CTA row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '8px 14px' }}>
+                <MapPin size={16} style={{ color: 'var(--bitezy-red)', flexShrink: 0 }} />
+                <select
+                  value={selectedLocality}
+                  onChange={e => setSelectedLocality(e.target.value)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 14, fontWeight: 600, cursor: 'pointer', outline: 'none', width: 'auto', padding: 0 }}
+                >
+                  {LOCALITIES.map(l => <option key={l}>{l}, Bengaluru</option>)}
+                </select>
               </div>
 
-              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'white' }}>
-                {activeOfferDecision.notification?.title}
-              </h3>
-              <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '4px', maxWidth: '650px' }}>
-                {activeOfferDecision.notification?.body}
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-              <button
-                className="btn btn-primary"
-                onClick={() => {
-                  const item = catalog.find(i => i.id === activeOfferDecision.offer.item_id)
-                  if (item) {
-                    onAddToCart(item, activeOfferDecision.offer.discount_pct)
-                  }
-                }}
-              >
-                <Zap size={16} /> {activeOfferDecision.notification?.cta || 'Claim & Add to Cart'}
+              <button className="btn btn-primary btn-lg" onClick={() => setCravingOpen(true)} style={{ gap: 8 }}>
+                <Zap size={16} /> What are you craving?
               </button>
-
-              {activeOfferDecision.ui_hints && (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', gap: '10px' }}>
-                  <span><MapPin size={12} style={{ inlineSize: '12px' }} /> {activeOfferDecision.ui_hints.distance_m}m away</span>
-                  <span><Clock size={12} style={{ inlineSize: '12px' }} /> {activeOfferDecision.ui_hints.walk_minutes} min walk</span>
-                </div>
-              )}
             </div>
           </div>
         </div>
-      ) : (
-        <div className="card" style={{ marginBottom: '24px', background: 'var(--bg-secondary)', padding: '14px 20px', fontSize: '13px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Info size={18} style={{ color: 'var(--text-muted)' }} />
-          <span>
-            Standard Catalog Browsing: AI decision engine returned <strong>SKIP</strong> for current persona context ({activeOfferDecision?.reason || 'No active promotional window'}).
-          </span>
-        </div>
-      )}
+      </div>
 
-      {/* Catalog Search & Category Filter Bar */}
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '16px' }}>
-          <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
-            <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              placeholder="Search dishes, drinks, bakery items, merchants..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ paddingLeft: '38px' }}
-            />
+      <div className="page-body">
+
+        {/* ── RECOMMENDATIONS (if any) ── */}
+        {recommendations.length > 0 && (
+          <section style={{ marginBottom: 40 }} className="fade-in">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>
+                  <Zap size={20} style={{ color: 'var(--bitezy-red)', marginRight: 8, verticalAlign: 'middle' }} />
+                  Personalized Offers For You
+                </h2>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                  {recommendations.length} AI-matched offer{recommendations.length > 1 ? 's' : ''} based on your preferences
+                </p>
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setRecommendations([])}>
+                <X size={14} /> Clear
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {recommendations.map((rec, i) => {
+                const offerId = rec.offer?.item_id || rec.scenario_id
+                const responded = respondedOffers.has(offerId)
+                const m = rec.merchant
+
+                return (
+                  <div key={i} className="card card-hover fade-in" style={{ animationDelay: `${i * 0.05}s`, borderLeft: '3px solid var(--bitezy-red)', padding: 0, overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', gap: 0 }}>
+                      {/* Left: Merchant emoji banner */}
+                      <div style={{
+                        width: 100, flexShrink: 0,
+                        background: 'linear-gradient(135deg, #1a0a0c, #2a1010)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 40
+                      }}>
+                        {m.category === 'cafe' ? '☕' : m.category === 'fast_food' ? '🍔' : m.category === 'healthy' ? '🥗' : '🍽️'}
+                      </div>
+
+                      <div style={{ flex: 1, padding: '16px 20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                              <span style={{ fontWeight: 800, fontSize: 16 }}>{m.name}</span>
+                              <span className="badge badge-green" style={{ fontSize: 10 }}>AI Match</span>
+                              {rec.offer?.discount_pct > 0 && (
+                                <span className="discount-tag">{rec.offer.discount_pct}% OFF</span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                              {rec.notification?.body || rec.reason}
+                            </div>
+                            <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                              {rec.ui_hints?.distance_m != null && (
+                                <span><MapPin size={11} style={{ verticalAlign: 'middle' }} /> {rec.ui_hints.distance_m}m away</span>
+                              )}
+                              {rec.ui_hints?.walk_minutes != null && (
+                                <span><Clock size={11} style={{ verticalAlign: 'middle' }} /> ~{rec.ui_hints.walk_minutes} min walk</span>
+                              )}
+                              {rec.offer && (
+                                <span>
+                                  <Tag size={11} style={{ verticalAlign: 'middle' }} />{' '}
+                                  {rec.offer.discount_pct > 0 ? (
+                                    <>₹{rec.offer.final_price_inr?.toFixed(0)} <span style={{ textDecoration: 'line-through', opacity: 0.5 }}>₹{catalog.find(c => c.id === rec.offer.item_id)?.price_inr?.toFixed(0) || '—'}</span></>
+                                  ) : (
+                                    <>₹{rec.offer.final_price_inr?.toFixed(0)}</>
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action buttons */}
+                          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                            {responded ? (
+                              <span style={{ fontSize: 13, color: 'var(--text-muted)', padding: '6px 12px' }}>Response recorded ✓</span>
+                            ) : (
+                              <>
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  onClick={() => handleOfferResponse(rec, 'accepted')}
+                                  style={{ gap: 5 }}
+                                >
+                                  <CheckCircle size={13} /> Accept & Add to Cart
+                                </button>
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => handleOfferResponse(rec, 'rejected')}
+                                  style={{ gap: 5 }}
+                                >
+                                  <XCircle size={13} /> Reject
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {rec.reason && (
+                          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '6px 12px', borderRadius: 6, fontStyle: 'italic' }}>
+                            💡 {rec.reason}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* ── CATEGORY TILES ── */}
+        <section style={{ marginBottom: 32 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Browse by Category</h2>
+          <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
+            {CATEGORIES.map(cat => (
+              <div
+                key={cat.key}
+                className={`category-tile ${category === cat.key ? 'active' : ''}`}
+                onClick={() => setCategory(cat.key)}
+                style={{ minWidth: 90 }}
+              >
+                <span className="cat-emoji">{cat.emoji}</span>
+                <span className="cat-label">{cat.label}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── MERCHANTS GRID ── */}
+        <section style={{ marginBottom: 40 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 800 }}>
+              {category === 'all' ? 'Restaurants & Cafés Near You' : CATEGORIES.find(c => c.key === category)?.label + ' Near You'}
+            </h2>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{filteredMerchants.length} places</span>
           </div>
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, textTransform: 'none', fontSize: '13px' }}>
-            <input
-              type="checkbox"
-              checked={vegOnly}
-              onChange={(e) => setVegOnly(e.target.checked)}
-              style={{ width: 'auto' }}
-            />
-            <span className="badge badge-green">Veg Only</span>
-          </label>
-        </div>
+          {loading ? (
+            <div className="grid-auto">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="skeleton" style={{ height: 220, borderRadius: 12 }} />
+              ))}
+            </div>
+          ) : filteredMerchants.length === 0 ? (
+            <div className="empty-state">
+              <div className="emoji">🔍</div>
+              <h3>No results found</h3>
+              <p>Try a different category or search term</p>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setCategory('all'); setSearchQ('') }}>
+                Clear filters
+              </button>
+            </div>
+          ) : (
+            <div className="grid-auto">
+              {filteredMerchants.map((m, i) => (
+                <MerchantCard
+                  key={m.id}
+                  merchant={m}
+                  catalog={catalog}
+                  delay={i * 0.03}
+                  onClick={() => openMerchant(m)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
 
-        {/* Category Chips */}
-        <div className="filter-chips" style={{ margin: 0 }}>
-          {['all', 'general', 'cafe', 'restaurant', 'bakery', 'dessert'].map(cat => (
-            <button
-              key={cat}
-              className={`chip ${selectedCategory === cat ? 'active' : ''}`}
-              onClick={() => setSelectedCategory(cat)}
-            >
-              {cat.toUpperCase()}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Product Catalog Grid */}
-      <div className="section-title">
-        <Store size={16} /> Available Items ({filteredCatalog.length})
-      </div>
-
-      <div className="grid-3">
-        {filteredCatalog.map(item => {
-          const merchant = merchants[item.merchant_id]
-          const isOfferedItem = activeOfferDecision?.offer?.item_id === item.id
-          const discountPct = isOfferedItem ? activeOfferDecision.offer.discount_pct : 0
-          const finalPrice = discountPct ? roundTwo(item.price_inr * (1 - discountPct / 100)) : item.price_inr
-
-          return (
-            <div className="card" key={item.id} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
-              {isOfferedItem && (
-                <div style={{ position: 'absolute', top: '12px', right: '12px' }}>
-                  <span className="badge badge-amber font-mono">-{discountPct}% AI Offer</span>
-                </div>
-              )}
-
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                  <span className={`badge ${item.is_veg ? 'badge-green' : 'badge-red'}`} style={{ fontSize: '10px' }}>
-                    {item.is_veg ? 'VEG' : 'NON-VEG'}
-                  </span>
-                  <span className="badge badge-blue">{item.category}</span>
-                </div>
-
-                <h4 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '4px' }}>
-                  {item.title}
-                </h4>
-
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-                  Merchant: <strong>{merchant?.name || item.merchant_id}</strong> ({merchant?.locality || 'Bengaluru'})
-                </div>
-
-                {item.tags && (
-                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '12px' }}>
-                    {item.tags.split(',').map((tag: string) => (
-                      <span className="tag" key={tag}>{tag.trim()}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <div className="divider"></div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    {discountPct > 0 ? (
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-                        <span className="font-mono text-green" style={{ fontSize: '18px', fontWeight: 800 }}>
-                          ₹{finalPrice}
-                        </span>
-                        <span className="font-mono text-muted" style={{ textDecoration: 'line-through', fontSize: '12px' }}>
-                          ₹{item.price_inr}
+        {/* ── POPULAR DISHES ── */}
+        {catalog.length > 0 && (
+          <section style={{ marginBottom: 40 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 20 }}>Popular Dishes</h2>
+            <div className="grid-auto-sm">
+              {catalog.filter(i => i.stock_units > 0).slice(0, 12).map((item, i) => {
+                const m = merchants.find(m => m.id === item.merchant_id)
+                return (
+                  <div key={item.id} className="food-card fade-in" style={{ animationDelay: `${i * 0.03}s` }} onClick={() => m && openMerchant(m)}>
+                    <div style={{ height: 100, background: `linear-gradient(135deg, #1a1015 0%, #0d1020 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 44 }}>
+                      {item.is_veg ? '🌱' : '🍖'}
+                    </div>
+                    <div style={{ padding: '12px 14px' }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>{m?.name || 'Cafe'}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: 800, color: 'var(--bitezy-red)' }}>₹{item.price_inr}</span>
+                        <span className={`badge ${item.is_veg ? 'badge-veg' : 'badge-nonveg'}`} style={{ fontSize: 9 }}>
+                          {item.is_veg ? <Leaf size={9} /> : <FlameIcon size={9} />}
+                          {item.is_veg ? 'VEG' : 'NON-VEG'}
                         </span>
                       </div>
-                    ) : (
-                      <span className="font-mono text-primary" style={{ fontSize: '18px', fontWeight: 800 }}>
-                        ₹{item.price_inr}
-                      </span>
-                    )}
+                    </div>
                   </div>
-
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <button
-                      className="btn btn-ghost"
-                      style={{ padding: '6px 10px', fontSize: '12px' }}
-                      onClick={() => setSelectedProductDetail({ item, merchant, discountPct, finalPrice })}
-                    >
-                      <Info size={14} />
-                    </button>
-
-                    <button
-                      className="btn btn-primary"
-                      style={{ padding: '6px 14px', fontSize: '12px' }}
-                      onClick={() => onAddToCart(item, discountPct)}
-                    >
-                      <Plus size={14} /> Add
-                    </button>
-                  </div>
-                </div>
-              </div>
+                )
+              })}
             </div>
-          )
-        })}
+          </section>
+        )}
       </div>
 
-      {/* Product Detail Quick View Modal */}
-      {selectedProductDetail && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.7)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 2000,
-          padding: '20px'
-        }}>
-          <div className="card-elevated fade-in" style={{ maxWidth: '500px', width: '100%', position: 'relative' }}>
-            <button
-              onClick={() => setSelectedProductDetail(null)}
-              style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-            >
-              <X size={20} />
-            </button>
-
-            <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px' }}>
-              {selectedProductDetail.item.title}
-            </h3>
-
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-              Merchant: <strong>{selectedProductDetail.merchant?.name}</strong> ({selectedProductDetail.merchant?.locality})
-            </p>
-
-            <div className="grid-2" style={{ marginBottom: '16px' }}>
-              <div className="metric-row">
-                <span className="metric-label">Base Price</span>
-                <span className="metric-value font-mono">₹{selectedProductDetail.item.price_inr}</span>
+      {/* ── CRAVING FORM MODAL ── */}
+      {cravingOpen && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setCravingOpen(false)}>
+          <div className="modal-box slide-up" style={{ maxWidth: 560 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ fontSize: 22, fontWeight: 800 }}>What are you craving? <span style={{ color: 'var(--bitezy-red)' }}>🤤</span></h2>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>Tell us your preferences — our AI will find the best deals</p>
               </div>
-              <div className="metric-row">
-                <span className="metric-label">Stock Units</span>
-                <span className="metric-value">{selectedProductDetail.item.stock_units}</span>
-              </div>
-              <div className="metric-row">
-                <span className="metric-label">Prep Time</span>
-                <span className="metric-value">{selectedProductDetail.item.prep_minutes} min</span>
-              </div>
-              <div className="metric-row">
-                <span className="metric-label">Merchant Occupancy</span>
-                <span className="metric-value">{selectedProductDetail.merchant?.occupancy_pct}%</span>
-              </div>
+              <button onClick={() => setCravingOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={18} /></button>
             </div>
 
-            <button
-              className="btn btn-primary"
-              style={{ width: '100%', justifyContent: 'center' }}
-              onClick={() => {
-                onAddToCart(selectedProductDetail.item, selectedProductDetail.discountPct)
-                setSelectedProductDetail(null)
-              }}
-            >
-              Add to Cart for ₹{selectedProductDetail.finalPrice}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {/* Food Preference */}
+              <div>
+                <label>Food Preference</label>
+                <div className="chip-group">
+                  {[
+                    { key: 'south_indian', label: '🥘 South Indian' },
+                    { key: 'fast_food', label: '🍔 Fast Food' },
+                    { key: 'healthy', label: '🥗 Healthy' },
+                    { key: 'cafe', label: '☕ Cafe & Beverages' },
+                    { key: 'anything', label: '🍽️ Anything' },
+                  ].map(opt => (
+                    <button key={opt.key} className={`chip ${prefs.food_preference === opt.key ? 'active' : ''}`} onClick={() => setPrefs(p => ({ ...p, food_preference: opt.key }))}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Budget */}
+              <div>
+                <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Budget</span>
+                  <span style={{ color: 'var(--bitezy-red)', fontWeight: 800, fontSize: 14 }}>₹{prefs.budget}</span>
+                </label>
+                <input type="range" min={50} max={500} step={10} value={prefs.budget}
+                  onChange={e => setPrefs(p => ({ ...p, budget: parseInt(e.target.value) }))} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                  <span>₹50</span><span>₹500</span>
+                </div>
+              </div>
+
+              {/* Available Time */}
+              <div>
+                <label>Available Time</label>
+                <div className="chip-group">
+                  {[{ v: 10, l: '10 min' }, { v: 20, l: '20 min' }, { v: 30, l: '30 min' }, { v: 60, l: '1 hour' }].map(opt => (
+                    <button key={opt.v} className={`chip ${prefs.available_time === opt.v ? 'active' : ''}`} onClick={() => setPrefs(p => ({ ...p, available_time: opt.v }))}>
+                      <Clock size={12} /> {opt.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Dietary */}
+              <div>
+                <label>Dietary Preference</label>
+                <div className="chip-group">
+                  {[
+                    { key: 'veg', label: '🌱 Vegetarian' },
+                    { key: 'non_veg', label: '🍖 Non-Vegetarian' },
+                    { key: 'both', label: '🍽️ Both' },
+                  ].map(opt => (
+                    <button key={opt.key} className={`chip ${prefs.food_type === opt.key ? 'active' : ''}`} onClick={() => setPrefs(p => ({ ...p, food_type: opt.key }))}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Distance */}
+              <div>
+                <label>Max Walking Distance</label>
+                <div className="chip-group">
+                  {[{ v: 500, l: '500m' }, { v: 1000, l: '1 km' }, { v: 2000, l: '2 km' }, { v: 9999, l: 'Anywhere' }].map(opt => (
+                    <button key={opt.v} className={`chip ${prefs.max_distance_m === opt.v ? 'active' : ''}`} onClick={() => setPrefs(p => ({ ...p, max_distance_m: opt.v }))}>
+                      <MapPin size={12} /> {opt.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Location */}
+              <div>
+                <label>Your Location</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select value={prefs.locality || selectedLocality} onChange={e => setPrefs(p => ({ ...p, locality: e.target.value }))} style={{ flex: 1 }}>
+                    {LOCALITIES.map(l => <option key={l}>{l}</option>)}
+                  </select>
+                  <button className="btn btn-ghost btn-sm" onClick={requestGeo} style={{ flexShrink: 0, gap: 5 }}>
+                    {geoStatus === 'requesting' ? <Loader2 size={13} className="spinner" /> : <MapPin size={13} />}
+                    {geoStatus === 'ok' ? '✓ GPS' : geoStatus === 'denied' ? 'Denied' : 'GPS'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Free text */}
+              <div>
+                <label>Anything specific? (optional)</label>
+                <input placeholder="e.g. dosa, filter coffee, biryani, sandwich…" value={prefs.intent} onChange={e => setPrefs(p => ({ ...p, intent: e.target.value }))} />
+              </div>
+
+              <button
+                className="btn btn-primary btn-lg"
+                style={{ justifyContent: 'center' }}
+                onClick={handleGetRecommendations}
+                disabled={recLoading || !activeCustomer}
+              >
+                {recLoading ? <><Loader2 size={16} className="spinner" /> Finding deals…</> : <><Zap size={16} /> Get My Personalized Offers</>}
+              </button>
+
+              {!activeCustomer && (
+                <p style={{ fontSize: 12, color: 'var(--bitezy-red)', textAlign: 'center' }}>Please select a customer profile or sign in first</p>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Cart Drawer */}
-      {isCartOpen && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.7)',
-          zIndex: 2000,
-          display: 'flex',
-          justifyContent: 'flex-end'
-        }}>
-          <div className="card-elevated slide-in" style={{
-            width: '100%',
-            maxWidth: '400px',
-            height: '100vh',
-            borderRadius: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between'
-          }}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h3 style={{ fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <ShoppingBag size={20} /> Shopping Cart
-                </h3>
-                <button onClick={onCloseCart} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                  <X size={20} />
-                </button>
-              </div>
-
-              {checkoutComplete ? (
-                <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--accent-green)' }}>
-                  <Check size={48} style={{ margin: '0 auto 16px' }} />
-                  <h4 style={{ fontSize: '18px', fontWeight: 700 }}>Order Confirmed!</h4>
-                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '8px' }}>
-                    Your hyperlocal offer order has been dispatched.
-                  </p>
+      {/* ── RESTAURANT DETAIL MODAL ── */}
+      {selectedMerchant && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setSelectedMerchant(null)}>
+          <div className="modal-box modal-lg slide-up" style={{ maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <div>
+                <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>{selectedMerchant.name}</h2>
+                <div style={{ display: 'flex', gap: 12, fontSize: 13, color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
+                  <span>{selectedMerchant.category}</span>
+                  <span><MapPin size={12} style={{ verticalAlign: 'middle' }} /> {selectedMerchant.locality}</span>
+                  <span><Clock size={12} style={{ verticalAlign: 'middle' }} /> {selectedMerchant.open_hour}:00 – {selectedMerchant.close_hour}:00</span>
+                  {selectedMerchant.max_discount_pct > 0 && <span className="discount-tag">Up to {selectedMerchant.max_discount_pct}% off</span>}
                 </div>
-              ) : cart.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
-                  <ShoppingBag size={40} style={{ opacity: 0.4, marginBottom: '12px' }} />
-                  <p>Your cart is empty.</p>
+              </div>
+              <button onClick={() => setSelectedMerchant(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0 }}><X size={20} /></button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {merchantLoading ? (
+                <div className="loading-overlay"><Loader2 size={28} className="spinner" /><span>Loading menu…</span></div>
+              ) : merchantItems.length === 0 ? (
+                <div className="empty-state"><div className="emoji">🍽️</div><h3>No menu items</h3><p>This restaurant hasn't added their menu yet.</p></div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {merchantItems.map(item => (
+                    <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', background: 'var(--bg-card)', border: '1px solid var(--border-default)', borderRadius: 10 }}>
+                      <div style={{ width: 50, height: 50, borderRadius: 8, background: 'var(--bg-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>
+                        {item.is_veg ? '🌱' : '🍖'}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 2 }}>{item.title}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                          Prep: {item.prep_minutes} min • Stock: {item.stock_units}
+                          {item.tags && <span> • {item.tags}</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                        <span className={`badge ${item.is_veg ? 'badge-veg' : 'badge-nonveg'}`}>{item.is_veg ? 'VEG' : 'NON-VEG'}</span>
+                        <span style={{ fontWeight: 800, fontSize: 16, color: 'var(--bitezy-red)' }}>₹{item.price_inr}</span>
+                        {item.stock_units > 0 ? (
+                          <button className="btn btn-primary btn-sm" onClick={() => onAddToCart(item)} style={{ gap: 4 }}>
+                            <Plus size={13} /> Add
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 10px' }}>Out of stock</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CART DRAWER ── */}
+      {isCartOpen && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1499 }} onClick={onCloseCart} />
+          <div className="cart-drawer">
+            <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid var(--border-default)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontWeight: 800, fontSize: 18 }}>
+                <ShoppingBag size={18} style={{ verticalAlign: 'middle', marginRight: 8, color: 'var(--bitezy-red)' }} />
+                Your Cart ({cart.length})
+              </h3>
+              <button onClick={onCloseCart} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+              {cart.length === 0 ? (
+                <div className="empty-state" style={{ padding: '40px 20px' }}>
+                  <div className="emoji" style={{ fontSize: 48 }}>🛒</div>
+                  <h3>Your cart is empty</h3>
+                  <p>Accept an offer or add items from a restaurant</p>
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '60vh', overflowY: 'auto' }}>
-                  {cart.map((cartItem, idx) => {
-                    const finalP = cartItem.discountPct ? roundTwo(cartItem.price_inr * (1 - cartItem.discountPct / 100)) : cartItem.price_inr
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {cart.map((item, idx) => {
+                    const original = catalog.find(c => c.id === item.id)
                     return (
-                      <div key={idx} style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '14px' }}>{cartItem.title}</div>
-                          {cartItem.discountPct && (
-                            <span className="badge badge-amber" style={{ fontSize: '10px' }}>
-                              -{cartItem.discountPct}% AI Discount
-                            </span>
-                          )}
+                      <div key={idx} style={{ display: 'flex', gap: 12, padding: '12px 14px', background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border-default)' }}>
+                        <div style={{ fontSize: 28, flexShrink: 0 }}>{item.is_veg ? '🌱' : '🍖'}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{item.title}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontWeight: 800, color: 'var(--bitezy-red)' }}>₹{item.price_inr?.toFixed(0)}</span>
+                            {item.discountPct > 0 && original && (
+                              <span style={{ textDecoration: 'line-through', fontSize: 12, color: 'var(--text-muted)' }}>₹{original.price_inr?.toFixed(0)}</span>
+                            )}
+                          </div>
                         </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <span className="font-mono text-green" style={{ fontWeight: 700 }}>
-                            ₹{finalP}
-                          </span>
-                          <button
-                            onClick={() => onRemoveFromCart(cartItem.id)}
-                            style={{ background: 'none', border: 'none', color: 'var(--accent-red)', cursor: 'pointer' }}
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
+                        <button onClick={() => onRemoveFromCart(idx.toString())} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', alignSelf: 'flex-start' }}>
+                          <X size={16} />
+                        </button>
                       </div>
                     )
                   })}
@@ -477,23 +708,72 @@ export default function CustomerStore({
               )}
             </div>
 
-            {!checkoutComplete && cart.length > 0 && (
-              <div>
-                <div className="divider"></div>
-                <div className="metric-row" style={{ fontSize: '16px', fontWeight: 700 }}>
-                  <span>Total Amount</span>
-                  <span className="font-mono text-green">₹{roundTwo(subtotal)}</span>
+            {cart.length > 0 && (
+              <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border-default)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, color: 'var(--text-secondary)' }}>
+                    <span>Subtotal</span><span>₹{cartSubtotal.toFixed(0)}</span>
+                  </div>
+                  {cartSavings > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, color: 'var(--accent-green)' }}>
+                      <span>Savings</span><span>-₹{cartSavings.toFixed(0)}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 800 }}>
+                    <span>Total</span><span style={{ color: 'var(--bitezy-red)' }}>₹{(cartSubtotal).toFixed(0)}</span>
+                  </div>
                 </div>
 
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', marginTop: '16px', justifyContent: 'center' }}
-                  onClick={handleCheckout}
-                >
-                  <Check size={16} /> Complete Checkout
+                <button className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setCheckoutOpen(true)}>
+                  Proceed to Demo Checkout
+                </button>
+                <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }} onClick={() => { onClearCart(); onCloseCart() }}>
+                  Clear Cart
                 </button>
               </div>
             )}
+          </div>
+        </>
+      )}
+
+      {/* ── DEMO CHECKOUT MODAL ── */}
+      {checkoutOpen && !checkoutDone && (
+        <div className="modal-overlay" style={{ zIndex: 3000 }}>
+          <div className="modal-box modal-sm slide-up">
+            <h3 style={{ fontWeight: 800, fontSize: 20, marginBottom: 16 }}>Demo Checkout</h3>
+            <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--accent-amber)' }}>
+              ⚠️ This is a demo experience. No real payment will be processed. No actual order will be placed.
+            </div>
+            <div style={{ marginBottom: 20, fontSize: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-default)' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Items</span><span>{cart.length}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', fontWeight: 800, fontSize: 16 }}>
+                <span>Demo Total</span><span style={{ color: 'var(--bitezy-red)' }}>₹{cartSubtotal.toFixed(0)}</span>
+              </div>
+            </div>
+            <button className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }} onClick={() => { setCheckoutDone(true); setCheckoutOpen(false); onClearCart(); onCloseCart() }}>
+              ✓ Simulate Demo Checkout
+            </button>
+            <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setCheckoutOpen(false)}>
+              Back to Cart
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── CHECKOUT SUCCESS ── */}
+      {checkoutDone && (
+        <div className="modal-overlay" style={{ zIndex: 3000 }} onClick={() => setCheckoutDone(false)}>
+          <div className="modal-box modal-sm slide-up" style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 60, marginBottom: 16 }}>🎉</div>
+            <h3 style={{ fontWeight: 900, fontSize: 22, marginBottom: 8, color: 'var(--accent-green)' }}>Demo Order Placed!</h3>
+            <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20 }}>
+              This was a simulated checkout. In a real integration, your order would be sent to the restaurant.
+            </p>
+            <button className="btn btn-primary" style={{ justifyContent: 'center', width: '100%' }} onClick={() => setCheckoutDone(false)}>
+              Continue Browsing
+            </button>
           </div>
         </div>
       )}
@@ -501,6 +781,52 @@ export default function CustomerStore({
   )
 }
 
-function roundTwo(val: number) {
-  return Math.round(val * 100) / 100
+function MerchantCard({ merchant: m, catalog, delay, onClick }: any) {
+  const items = catalog.filter((i: any) => i.merchant_id === m.id)
+  const minPrice = items.length > 0 ? Math.min(...items.map((i: any) => i.price_inr)) : m.base_price_inr
+  const emoji = m.category === 'cafe' ? '☕' : m.category?.includes('fast') ? '🍔' : m.category === 'healthy' ? '🥗' : m.category?.includes('biryani') ? '🍛' : '🍽️'
+
+  return (
+    <div className="restaurant-card fade-in" style={{ animationDelay: `${delay}s` }} onClick={onClick}>
+      {/* Cover */}
+      <div style={{
+        height: 140, background: `linear-gradient(135deg, hsl(${(m.id?.charCodeAt(2) || 20) * 30 % 360}deg 20% 12%), #0d0f12)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 56,
+        position: 'relative'
+      }}>
+        {emoji}
+        {m.max_discount_pct > 0 && (
+          <div className="discount-tag" style={{ position: 'absolute', top: 10, left: 10 }}>
+            Up to {m.max_discount_pct}% off
+          </div>
+        )}
+        <div style={{
+          position: 'absolute', top: 10, right: 10,
+          background: 'rgba(0,0,0,0.6)', borderRadius: 6, padding: '4px 8px',
+          fontSize: 11, color: 'white', display: 'flex', alignItems: 'center', gap: 4
+        }}>
+          <Clock size={11} /> {m.open_hour}:00–{m.close_hour}:00
+        </div>
+      </div>
+
+      {/* Info */}
+      <div style={{ padding: '14px 16px' }}>
+        <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+          <span style={{ textTransform: 'capitalize' }}>{m.category}</span>
+          <span>•</span>
+          <MapPin size={11} />
+          <span>{m.locality}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            From <strong style={{ color: 'var(--text-primary)' }}>₹{minPrice?.toFixed(0) || '—'}</strong>
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--bitezy-red)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+            View Menu <ChevronRight size={13} />
+          </span>
+        </div>
+      </div>
+    </div>
+  )
 }
