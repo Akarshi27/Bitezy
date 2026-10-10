@@ -2,16 +2,16 @@
   "customers": {
     "c_reg_001": {
       "id": "c_reg_001",
-      "name": "Akarshi Srivastava",
-      "email": "akarshisrivastava2@gmail.com",
-      "password_hash": "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f",
+      "name": "Akarshi Test",
+      "email": "test_user_1791621380273@bitezy.com",
+      "password_hash": "4dbd5e49147b5102ee2731ac03dd0db7decc3b8715c3df3c1f3ddc62dcbcf86d",
       "language": "en",
-      "locality": "Koramangala",
+      "locality": "Indiranagar",
       "marketing_consent": true,
       "wallet_inr": 500.0,
-      "declared_preferences": "south_indian,cafe",
-      "food_type": "veg",
-      "budget": 300,
+      "declared_preferences": "biryani,fast_food",
+      "food_type": "non_veg",
+      "budget": 450,
       "max_distance_m": 2000,
       "churn_risk": 0.1,
       "price_sensitivity": 0.5,
@@ -20,52 +20,16 @@
     },
     "c_reg_002": {
       "id": "c_reg_002",
-      "name": "Akarshi Test",
-      "email": "test_user_01@bitezy.com",
-      "password_hash": "4dbd5e49147b5102ee2731ac03dd0db7decc3b8715c3df3c1f3ddc62dcbcf86d",
+      "name": "Priya Sharma",
+      "email": "cust_1791621380369@bitezy.com",
+      "password_hash": "0de3f42a37488c7cdb1df0b9d807d563220a2b102c67ef92f616fd1689c85291",
       "language": "en",
-      "locality": "Indiranagar",
+      "locality": "Koramangala",
       "marketing_consent": true,
       "wallet_inr": 500.0,
-      "declared_preferences": "biryani,fast_food",
-      "food_type": "non_veg",
-      "budget": 450,
-      "max_distance_m": 2000,
-      "churn_risk": 0.1,
-      "price_sensitivity": 0.5,
-      "avg_spend": 200.0,
-      "visit_history": []
-    },
-    "c_reg_003": {
-      "id": "c_reg_003",
-      "name": "Akarshi Test",
-      "email": "test_user_1791619061968@bitezy.com",
-      "password_hash": "4dbd5e49147b5102ee2731ac03dd0db7decc3b8715c3df3c1f3ddc62dcbcf86d",
-      "language": "en",
-      "locality": "Indiranagar",
-      "marketing_consent": true,
-      "wallet_inr": 500.0,
-      "declared_preferences": "biryani,fast_food",
-      "food_type": "non_veg",
-      "budget": 450,
-      "max_distance_m": 2000,
-      "churn_risk": 0.1,
-      "price_sensitivity": 0.5,
-      "avg_spend": 200.0,
-      "visit_history": []
-    },
-    "c_reg_004": {
-      "id": "c_reg_004",
-      "name": "Akarshi Test",
-      "email": "test_user_1791619255722@bitezy.com",
-      "password_hash": "4dbd5e49147b5102ee2731ac03dd0db7decc3b8715c3df3c1f3ddc62dcbcf86d",
-      "language": "en",
-      "locality": "Indiranagar",
-      "marketing_consent": true,
-      "wallet_inr": 500.0,
-      "declared_preferences": "biryani,fast_food",
-      "food_type": "non_veg",
-      "budget": 450,
+      "declared_preferences": "south_indian,cafe",
+      "food_type": "veg",
+      "budget": 300.0,
       "max_distance_m": 2000,
       "churn_risk": 0.1,
       "price_sensitivity": 0.5,
@@ -73,45 +37,57 @@
       "visit_history": []
     }
   },
-  "merchants": {},
+  "merchants": {
+    "m_reg_001": {
+      "id": "m_reg_001",
+      "owner_name": "Rohan Mehta",
+      "name": "Little Fern Cafe Updated",
+      "email": "merch_1791621380399@cafe.com",
+      "phone": "+919876543210",
+      "address": "12th Main Rd, Indiranagar",
+      "password_hash": "7f9e0152e16561a69ef8875035eecb6454422b0e0bb388295327da2b38dd859b",
+      "category": "cafe",
+      "locality": "Indiranagar",
+      "lat": 12.93595,
+      "lng": 77.62484,
+      "capacity": 30,
+      "occupancy_pct": 20.0,
+      "max_discount_pct": 20.0,
+      "min_margin_pct": 15.0,
+      "open_hour": 8,
+      "close_hour": 22,
+      "promo_start_hour": 13.0,
+      "promo_end_hour": 16.0,
+      "weekdays_only": false,
+      "languages": "en,hi-en",
+      "base_price_inr": 200.0,
+      "unit_cost_inr": 80.0
+    }
+  },
   "offer_responses": [
     {
       "offer_id": "off_test_acc_001",
       "customer_id": "c_001",
       "merchant_id": "m_001",
       "action": "accepted"
-    },
-    {
-      "offer_id": "off_test_acc_001",
-      "customer_id": "c_001",
-      "merchant_id": "m_001",
-      "action": "accepted"
-    },
-    {
-      "offer_id": "off_test_acc_001",
-      "customer_id": "c_001",
-      "merchant_id": "m_001",
-      "action": "accepted"
-    },
-    {
-      "offer_id": "off_test_acc_001",
-      "customer_id": "c_001",
-      "merchant_id": "m_001",
-      "action": "accepted"
-    },
-    {
-      "offer_id": "off_test_acc_001",
-      "customer_id": "c_001",
-      "merchant_id": "m_001",
-      "action": "accepted"
-    },
-    {
-      "offer_id": "item_l_120",
-      "customer_id": "c_reg_001",
-      "merchant_id": "m_l_MER-003",
-      "action": "accepted",
-      "discount_pct": 0,
-      "final_price_inr": 70
     }
-  ]
+  ],
+  "offers": {
+    "off_m_001_001": {
+      "id": "off_m_001_001",
+      "merchant_id": "m_001",
+      "title": "Updated Title",
+      "description": "",
+      "item_id": "",
+      "discount_pct": 5.0,
+      "base_price_inr": 367.0,
+      "final_price_inr": 348.65,
+      "valid_minutes": 90,
+      "max_redemptions": 100,
+      "redemptions": 0,
+      "status": "published",
+      "created_at": "2026-10-10T14:06:20.319433",
+      "expires_at": ""
+    }
+  }
 }
