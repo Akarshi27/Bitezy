@@ -355,13 +355,12 @@ def update_merchant_profile(merchant_id: str, updates: dict) -> dict:
     if not merch:
         raise ValueError("Merchant not found")
         
-    for k in ['name', 'locality', 'open_hour', 'close_hour', 'promo_start_hour', 'promo_end_hour', 'max_discount_pct', 'min_margin_pct', 'base_price_inr', 'unit_cost_inr']:
+    for k in ['name', 'locality', 'open_hour', 'close_hour', 'promo_start_hour', 'promo_end_hour', 'max_discount_pct', 'min_margin_pct', 'base_price_inr', 'unit_cost_inr', 'preferred_language', 'language']:
         if k in updates:
             merch[k] = updates[k]
             
-    if merchant_id in _custom_data['merchants']:
-        _custom_data['merchants'][merchant_id] = merch
-        _save_custom_store()
+    _custom_data['merchants'][merchant_id] = merch
+    _save_custom_store()
         
     return sanitize_json_obj(merch)
 

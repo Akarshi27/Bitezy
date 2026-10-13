@@ -272,3 +272,171 @@ def process_customer_chat(
         'follow_up_prompt': follow_up,
         'total_eligible_count': len(eligible_results)
     }
+
+MERCHANT_ASSISTANT_TEXTS = {
+  'en': {
+    'low_stock_header': "📦 **Inventory Insights**",
+    'promo_header': "🚀 **Recommended Promotion**",
+    'perf_header': "📊 **Offer Performance Summary**",
+    'margin_info': "🛡️ **Margin Protection**: Max discount capped at {max_disc}% to preserve your {min_margin}% min profit margin."
+  },
+  'hi-en': {
+    'low_stock_header': "📦 **Inventory Insights**",
+    'promo_header': "🚀 **Recommended Promotion**",
+    'perf_header': "📊 **Offer Performance Summary**",
+    'margin_info': "🛡️ **Margin Protection**: Max discount {max_disc}% par cap hai taaki aapka {min_margin}% min profit margin safe rahe."
+  },
+  'hi': {
+    'low_stock_header': "📦 **इन्वेंटरी विश्लेषण**",
+    'promo_header': "🚀 **अनुशंसित प्रचार**",
+    'perf_header': "📊 **ऑफ़र प्रदर्शन सारांश**",
+    'margin_info': "🛡️ **मार्जिन सुरक्षा**: अधिकतम छूट {max_disc}% तक सीमित है ताकि आपका {min_margin}% न्यूनतम लाभ मार्जिन सुरक्षित रहे।"
+  },
+  'kn-en': {
+    'low_stock_header': "📦 **Inventory Insights**",
+    'promo_header': "🚀 **Recommended Promotion**",
+    'perf_header': "📊 **Offer Performance Summary**",
+    'margin_info': "🛡️ **Margin Protection**: Discount {max_disc}% ge cap maadalaagide nimma {min_margin}% min margin safe iralu."
+  },
+  'ta-en': {
+    'low_stock_header': "📦 **Inventory Insights**",
+    'promo_header': "🚀 **Recommended Promotion**",
+    'perf_header': "📊 **Offer Performance Summary**",
+    'margin_info': "🛡️ **Margin Protection**: Max discount {max_disc}% kkul cap seyyappattuladhu ungal {min_margin}% min margin paadhukaaka."
+  },
+  'te-en': {
+    'low_stock_header': "📦 **Inventory Insights**",
+    'promo_header': "🚀 **Recommended Promotion**",
+    'perf_header': "📊 **Offer Performance Summary**",
+    'margin_info': "🛡️ **Margin Protection**: Max discount {max_disc}% ki cap cheyabaddindi mee {min_margin}% min margin safe ga undataniki."
+  }
+}
+
+def process_merchant_chat(
+    merchant_id: str,
+    message: str,
+    language: str = 'en',
+    context: dict = None
+) -> dict:
+    """
+    Multilingual Merchant AI Business Assistant Pipeline:
+    1. Inspects authenticated merchant profile, menu, stock, cost, and min profit margin.
+    2. Fetches recorded offer response stats (sent, accepted, rejected).
+    3. Evaluates real margin bounds via `optimize_discount`.
+    4. Formats data-grounded insights & recommendations in merchant's language.
+    5. Prepares draft offer requiring explicit merchant approval.
+    """
+    from .data_loader import get_merchant, get_offer_responses
+    from .discount import optimize_discount
+
+    lang = language.lower() if language in MERCHANT_ASSISTANT_TEXTS else 'en'
+    texts = MERCHANT_ASSISTANT_TEXTS.get(lang, MERCHANT_ASSISTANT_TEXTS['en'])
+
+    data = get_data()
+    merchant = get_merchant(merchant_id)
+    if not merchant:
+        return {
+            'response_text': "⚠️ Merchant profile not found.",
+            'language': lang,
+            'draft_offer': None
+        }
+
+    menu_items = data.get('merchant_catalog', {}).get(merchant_id, [])
+    responses = get_offer_responses(merchant_id)
+    
+    max_disc = float(merchant.get('max_discount_pct', 20.0))
+    min_m = float(merchant.get('min_margin_pct', 15.0))
+    m_name = merchant.get('name', 'Partner Cafe')
+
+    # Analyze inventory
+    low_stock = [i for i in menu_items if i.get('stock_units', 0) <= 5 and i.get('stock_units', 0) > 0]
+    out_of_stock = [i for i in menu_items if i.get('stock_units', 0) == 0]
+    surplus_items = [i for i in menu_items if i.get('stock_units', 0) > 10]
+
+    # Analyze performance
+    sent_count = len(responses)
+    accepted_count = len([r for r in responses if r.get('action') == 'accepted'])
+    rejected_count = len([r for r in responses if r.get('action') == 'rejected'])
+    accept_rate = round(accepted_count / max(1, sent_count) * 100, 1) if sent_count > 0 else 0.0
+
+    # Evaluate best candidate item for promotion while strictly respecting min_margin
+    best_candidate = None
+    best_opt = None
+    best_margin_headroom = -1.0
+
+    for item in menu_items:
+        if item.get('stock_units', 0) > 0:
+            price = float(item.get('price_inr', 100))
+            cost = float(item.get('unit_cost_inr', merchant.get('unit_cost_inr', 50)))
+            opt = optimize_discount(get_customer('c_020'), merchant, item, dist_m=200)
+
+            final_p = opt['final_price_inr']
+            profit = final_p - cost
+            margin_pct = (profit / max(1.0, final_p)) * 100.0
+
+            if margin_pct >= min_m:
+                if margin_pct > best_margin_headroom:
+                    best_margin_headroom = margin_pct
+                    best_candidate = item
+                    best_opt = opt
+
+    # Build response text
+    response_lines = [
+        f"🤖 **Bitezy AI Partner Insights for {m_name}**\n"
+    ]
+
+    # Inventory section
+    if low_stock:
+        items_str = ", ".join([f"{i['title']} ({i['stock_units']} left)" for i in low_stock])
+        response_lines.append(f"{texts['low_stock_header']}: Low stock on **{items_str}**.")
+
+    # Performance section
+    response_lines.append(f"{texts['perf_header']}: {sent_count} offers sent, {accepted_count} accepted ({accept_rate}% rate).")
+    response_lines.append(texts['margin_info'].format(max_disc=int(max_disc), min_margin=int(min_m)))
+
+    draft_offer = None
+
+    if best_candidate and best_opt:
+        proposed_disc = best_opt['discount_pct']
+        final_p = best_opt['final_price_inr']
+        cost = float(best_candidate.get('unit_cost_inr', merchant.get('unit_cost_inr', 50)))
+        est_profit = round(final_p - cost, 2)
+        est_margin = round((est_profit / max(1.0, final_p)) * 100.0, 1)
+
+        response_lines.append(f"\n{texts['promo_header']}: Promote **{best_candidate['title']}** at **{proposed_disc}% OFF** (₹{final_p}).")
+        response_lines.append(f"💰 Estimated profit per unit: **₹{est_profit}** ({est_margin}% profit margin).")
+
+        # Create draft offer object for merchant review & approval
+        draft_offer = {
+            'merchant_id': merchant_id,
+            'item_id': best_candidate['id'],
+            'item_name': best_candidate['title'],
+            'title': f"{proposed_disc}% OFF on {best_candidate['title']}",
+            'description': f"Special promotion at {m_name}! Fresh {best_candidate['title']} at ₹{final_p}.",
+            'discount_pct': proposed_disc,
+            'base_price_inr': best_candidate['price_inr'],
+            'final_price_inr': final_p,
+            'estimated_profit_inr': est_profit,
+            'profit_margin_pct': est_margin,
+            'valid_minutes': 60,
+            'max_redemptions': min(30, best_candidate.get('stock_units', 30))
+        }
+
+    return {
+        'response_text': "\n".join(response_lines),
+        'language': lang,
+        'merchant_id': merchant_id,
+        'inventory_summary': {
+            'total_menu_items': len(menu_items),
+            'low_stock_count': len(low_stock),
+            'out_of_stock_count': len(out_of_stock)
+        },
+        'performance_summary': {
+            'offers_sent': sent_count,
+            'accepted_count': accepted_count,
+            'rejected_count': rejected_count,
+            'acceptance_rate_pct': accept_rate
+        },
+        'draft_offer': draft_offer
+    }
+

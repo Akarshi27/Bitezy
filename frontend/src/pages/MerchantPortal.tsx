@@ -20,7 +20,12 @@ import {
   PauseCircle,
   PlayCircle,
   AlertTriangle,
+  Globe,
+  Bot
 } from 'lucide-react'
+import MerchantAIAssistant from '../components/MerchantAIAssistant'
+import type { MerchantLang } from '../i18n/merchantLocales'
+import { tMerchant } from '../i18n/merchantLocales'
 
 const API_BASE = 'http://localhost:8000'
 
@@ -43,8 +48,21 @@ export default function MerchantPortal() {
   const [menuItems, setMenuItems] = useState<any[]>([])
   const [analytics, setAnalytics] = useState<any | null>(null)
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'menu' | 'promotions' | 'responses' | 'analytics'>('overview')
+  const [currentLang, setCurrentLang] = useState<MerchantLang>('en')
+  const [activeTab, setActiveTab] = useState<'overview' | 'menu' | 'promotions' | 'responses' | 'analytics' | 'assistant'>('overview')
   const [loading, setLoading] = useState(false)
+
+  const handleLanguageChange = async (newLang: MerchantLang) => {
+    setCurrentLang(newLang)
+    const token = getToken()
+    if (token) {
+      try {
+        await axios.put(`${API_BASE}/merchant/profile/me`, { preferred_language: newLang }, { headers: { Authorization: token } })
+      } catch (e) {
+        console.error('Failed to persist language preference:', e)
+      }
+    }
+  }
 
   const [editingItem, setEditingItem] = useState<any | null>(null)
   const [newItemModal, setNewItemModal] = useState(false)
@@ -153,7 +171,12 @@ export default function MerchantPortal() {
         axios.get(`${API_BASE}/merchant/offers/${mId}`).catch(() => ({ data: [] })),
       ])
 
-      if (profRes.data) setMerchantProfile(profRes.data)
+      if (profRes.data) {
+        setMerchantProfile(profRes.data)
+        if (profRes.data.preferred_language) {
+          setCurrentLang(profRes.data.preferred_language as MerchantLang)
+        }
+      }
       if (Array.isArray(menuRes.data)) setMenuItems(menuRes.data)
       if (anaRes.data) setAnalytics(anaRes.data)
       if (Array.isArray(offRes.data)) setOffers(offRes.data)
@@ -299,6 +322,23 @@ export default function MerchantPortal() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          {/* Language selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border-default)', borderRadius: 8, padding: '4px 10px', fontSize: 13 }}>
+            <Globe size={14} style={{ color: 'var(--bitezy-red)' }} />
+            <select
+              value={currentLang}
+              onChange={(e) => handleLanguageChange(e.target.value as MerchantLang)}
+              style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer' }}
+            >
+              <option value="en">English</option>
+              <option value="hi">Hindi (हिंदी)</option>
+              <option value="hi-en">Hinglish</option>
+              <option value="kn-en">Kannada-English</option>
+              <option value="ta-en">Tamil-English</option>
+              <option value="te-en">Telugu-English</option>
+            </select>
+          </div>
+
           {loggedInMerchant ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bitezy-red-light)', border: '1px solid rgba(226,55,68,0.3)', borderRadius: 8, padding: '6px 14px', fontSize: 13 }}>
               <Flame size={14} style={{ color: 'var(--bitezy-red)' }} />
@@ -307,7 +347,7 @@ export default function MerchantPortal() {
             </div>
           ) : (
             <button className="btn btn-secondary btn-sm" onClick={() => { setAuthTab('login'); setAuthModal('login'); setAuthError('') }} style={{ gap: 5 }}>
-              <LogIn size={13} /> Partner Sign In
+              <LogIn size={13} /> {tMerchant('login_required', currentLang)}
             </button>
           )}
           <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Demo Merchant:</span>
@@ -330,7 +370,7 @@ export default function MerchantPortal() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Flame size={20} style={{ color: 'var(--bitezy-red)' }} />
-                <span style={{ fontWeight: 900, fontSize: 18 }}>Bitezy Partner Hub</span>
+                <span style={{ fontWeight: 900, fontSize: 18 }}>{tMerchant('portal_title', currentLang)}</span>
               </div>
               <button onClick={() => setAuthModal(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={18} /></button>
             </div>
@@ -390,23 +430,26 @@ export default function MerchantPortal() {
       {/* Sub Navigation Bar */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', borderBottom: '1px solid var(--border-default)', paddingBottom: '12px', flexWrap: 'wrap' }}>
         <button className={`btn ${activeTab === 'overview' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('overview')}>
-          <Store size={16} /> Profile &amp; Operating Rules
+          <Store size={16} /> {tMerchant('tab_overview', currentLang)}
         </button>
         <button className={`btn ${activeTab === 'menu' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('menu')}>
-          <Utensils size={16} /> Live Menu Management ({menuItems.length})
+          <Utensils size={16} /> {tMerchant('tab_menu', currentLang)} ({menuItems.length})
         </button>
         <button className={`btn ${activeTab === 'promotions' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('promotions')}
           style={{ position: 'relative' }}>
-          <Tag size={16} /> Offers &amp; Promotions
+          <Tag size={16} /> {tMerchant('tab_promotions', currentLang)}
           {activeOffers.length > 0 && (
             <span style={{ position: 'absolute', top: -6, right: -6, background: 'var(--bitezy-red)', color: '#fff', borderRadius: '50%', width: 18, height: 18, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>{activeOffers.length}</span>
           )}
         </button>
         <button className={`btn ${activeTab === 'responses' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('responses')}>
-          <ListOrdered size={16} /> Customer Responses ({analytics?.offers_sent || 0})
+          <ListOrdered size={16} /> {tMerchant('tab_responses', currentLang)} ({analytics?.offers_sent || 0})
         </button>
         <button className={`btn ${activeTab === 'analytics' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('analytics')}>
-          <BarChart3 size={16} /> Real-Time Analytics
+          <BarChart3 size={16} /> {tMerchant('tab_analytics', currentLang)}
+        </button>
+        <button className={`btn ${activeTab === 'assistant' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('assistant')}>
+          <Bot size={16} /> {tMerchant('tab_assistant', currentLang)}
         </button>
       </div>
 
@@ -655,6 +698,19 @@ export default function MerchantPortal() {
                   <div className="stat-label">Customer Acceptance Rate</div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Tab 6: AI Business Assistant */}
+          {activeTab === 'assistant' && (
+            <div className="fade-in">
+              <MerchantAIAssistant
+                merchantId={selectedMerchantId}
+                merchantProfile={merchantProfile}
+                currentLanguage={currentLang}
+                onLanguageChange={handleLanguageChange}
+                onOfferPublished={() => loadMerchantData(selectedMerchantId)}
+              />
             </div>
           )}
         </div>
